@@ -5,6 +5,8 @@
 //! for the entire golden corpus (spec 09 §2). Unknown content is preserved,
 //! never normalized, never dropped.
 
+pub mod hyprlang;
+
 use std::path::Path;
 
 /// Where an effective value came from — Hyprland's source layering (spec 03 §2).

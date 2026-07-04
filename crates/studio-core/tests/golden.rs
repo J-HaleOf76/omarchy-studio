@@ -78,3 +78,62 @@ fn editing_a_fixture_preserves_all_other_bytes() {
         );
     });
 }
+
+mod hyprlang {
+    use std::path::PathBuf;
+    use studio_core::configfs::hyprlang::HyprDoc;
+
+    fn hypr_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hypr")
+    }
+
+    #[test]
+    fn real_hypr_configs_round_trip_byte_identical() {
+        let mut any = false;
+        for entry in std::fs::read_dir(hypr_dir()).expect("hypr fixtures") {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) == Some("conf") {
+                any = true;
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                let content = std::fs::read_to_string(&path).unwrap();
+                assert_eq!(
+                    HyprDoc::parse(&content).to_string(),
+                    content,
+                    "{name} did not round-trip byte-for-byte"
+                );
+            }
+        }
+        assert!(any, "no hypr fixtures found");
+    }
+
+    #[test]
+    fn parses_real_binds_and_looknfeel_values() {
+        let media = std::fs::read_to_string(hypr_dir().join("bindings-media.conf")).unwrap();
+        let binds = HyprDoc::parse(&media).binds();
+        assert!(binds.len() >= 8, "expected the media key binds");
+        assert!(binds.iter().all(|b| b.key.starts_with("bind")));
+
+        let lnf = std::fs::read_to_string(hypr_dir().join("looknfeel.conf")).unwrap();
+        let doc = HyprDoc::parse(&lnf);
+        assert_eq!(doc.get("general.gaps_in").as_deref(), Some("5"));
+        assert_eq!(doc.get("general.border_size").as_deref(), Some("2"));
+        // dotted key inside a category
+        assert_eq!(
+            doc.get("general.col.active_border").as_deref(),
+            Some("$activeBorderColor")
+        );
+    }
+
+    #[test]
+    fn editing_looknfeel_preserves_every_other_byte() {
+        let lnf = std::fs::read_to_string(hypr_dir().join("looknfeel.conf")).unwrap();
+        let mut doc = HyprDoc::parse(&lnf);
+        assert!(doc.set("general.gaps_in", "8"));
+        let out = doc.to_string();
+        // exactly one line differs
+        let diffs = lnf.lines().zip(out.lines()).filter(|(a, b)| a != b).count()
+            + (lnf.lines().count() as i64 - out.lines().count() as i64).unsigned_abs() as usize;
+        assert_eq!(diffs, 1, "only the edited line should change");
+        assert!(out.contains("gaps_in = 8"));
+    }
+}

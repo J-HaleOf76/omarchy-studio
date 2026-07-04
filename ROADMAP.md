@@ -20,7 +20,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 ## v0.2 — Keybinds (~2 wks) — *exit: rebind a default chord safely without seeing config syntax*
 
-- [ ] 0.2.1 hyprlang line CST + round-trip property tests [03 §2]
+- [x] 0.2.1 hyprlang line CST + byte-identical round-trip over 3 vendored real hypr configs; nested/dotted get-set, binds() accessor [03 §2]
 - [ ] 0.2.2 `hyprctl binds -j` model + source attribution pass [05 §1.1]
 - [ ] 0.2.3 Dispatcher schema (~40 entries) + human rendering [05 §1.1]
 - [ ] 0.2.4 Conflict detection + override/disable/reset writes [05 §1.2]
