@@ -10,6 +10,7 @@
 //! - [`engine`]   — settings schema, apply pipeline, verification (spec 01 §2–3)
 //! - [`snapshot`] — git-backed history, undo/restore (spec 03 §6)
 //! - [`deps`]     — dependency & tool registry, guided-install guidance (spec 06)
+//! - [`integration`] — omarchy menu install/uninstall (spec 02 §3)
 //! - [`modules`]  — domain logic per PRD module (specs 04–05)
 
 pub mod cmd;
@@ -17,6 +18,7 @@ pub mod configfs;
 pub mod deps;
 pub mod engine;
 pub mod error;
+pub mod integration;
 pub mod modules;
 pub mod omarchy;
 pub mod snapshot;

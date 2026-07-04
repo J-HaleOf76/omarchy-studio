@@ -15,7 +15,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.1.9 Palette editor + scratch-theme live preview loop [04 §2]
 - [x] 0.1.10 Dependency registry loader + probing [06 §1–3] *(DepBanner widget lands with the TUI, 0.1.7)*
 - [x] 0.1.11 CLI: `theme list/current/apply/fork`, `snapshot list/restore/undo`, `doctor --deps` [08] *(theme new --from-image lands with v0.6 extraction; known nit: SIGPIPE panic when piped to `head` — fix with the clap migration)*
-- [ ] 0.1.12 Menu-block installer (idempotent) + floating-terminal launch + `install-integration` [02 §3]
+- [x] 0.1.12 Menu-block installer (idempotent, snapshot-backed) + install-integration/uninstall CLI; floating launch via omarchy-launch-floating-terminal-with-presentation [02 §3]
 - [x] 0.1.13 Golden corpus vendored (3 real colors.toml), round-trip + edit-preservation tests, CI (fmt·clippy -D·test·adapter-boundary) [09 §2, §5]
 
 ## v0.2 — Keybinds (~2 wks) — *exit: rebind a default chord safely without seeing config syntax*

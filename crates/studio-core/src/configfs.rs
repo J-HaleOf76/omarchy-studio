@@ -69,6 +69,132 @@ pub fn atomic_write(path: &Path, content: &str) -> crate::error::Result<()> {
     Ok(())
 }
 
+/// Comment syntax for a config dialect, used to delimit managed blocks.
+#[derive(Debug, Clone, Copy)]
+pub enum CommentStyle {
+    /// `# …` — bash, ini, toml, hyprlang.
+    Hash,
+    /// `/* … */` — CSS.
+    CBlock,
+    /// `// …` — jsonc.
+    DblSlash,
+}
+
+impl CommentStyle {
+    fn line(self, inner: &str) -> String {
+        match self {
+            CommentStyle::Hash => format!("# {inner}"),
+            CommentStyle::CBlock => format!("/* {inner} */"),
+            CommentStyle::DblSlash => format!("// {inner}"),
+        }
+    }
+}
+
+/// A Studio-owned region inside a shared config file (spec 03 §4). Everything
+/// between the markers is regenerated wholesale on each write; everything
+/// outside is opaque and untouched. This is how Studio contributes to files
+/// it does not own (waybar CSS, swayosd CSS, the omarchy menu extension).
+pub struct ManagedBlock {
+    pub section: String,
+    pub style: CommentStyle,
+}
+
+impl ManagedBlock {
+    pub fn new(section: impl Into<String>, style: CommentStyle) -> Self {
+        Self {
+            section: section.into(),
+            style,
+        }
+    }
+
+    fn open(&self) -> String {
+        self.style.line(&format!(
+            ">>> omarchy-studio:{} — generated; edit outside this block only >>>",
+            self.section
+        ))
+    }
+
+    fn close(&self) -> String {
+        self.style
+            .line(&format!("<<< omarchy-studio:{} <<<", self.section))
+    }
+
+    /// The full block text (markers + body), without surrounding blank lines.
+    pub fn render(&self, body: &str) -> String {
+        format!(
+            "{}\n{}\n{}",
+            self.open(),
+            body.trim_end_matches('\n'),
+            self.close()
+        )
+    }
+
+    /// True if this section's block is already present.
+    pub fn contains(&self, content: &str) -> bool {
+        self.locate(content).is_some()
+    }
+
+    /// Byte range of the block (open marker line start .. close marker line
+    /// end), matching markers by trimmed line equality.
+    fn locate(&self, content: &str) -> Option<(usize, usize)> {
+        let (open, close) = (self.open(), self.close());
+        let mut start = None;
+        let mut offset = 0;
+        for line in content.split_inclusive('\n') {
+            let trimmed = line.trim_end_matches(['\n', ' ', '\t']);
+            if start.is_none() && trimmed == open {
+                start = Some(offset);
+            } else if start.is_some() && trimmed == close {
+                return Some((start.unwrap(), offset + line.trim_end_matches('\n').len()));
+            }
+            offset += line.len();
+        }
+        None
+    }
+
+    /// Insert or replace the block, returning the new file content. Replaces in
+    /// place if present; otherwise appends at end (blocks own the end of the
+    /// file so later definitions win, spec 03 §4).
+    pub fn upsert(&self, content: &str, body: &str) -> String {
+        let block = self.render(body);
+        match self.locate(content) {
+            Some((s, e)) => format!("{}{}{}", &content[..s], block, &content[e..]),
+            None => {
+                if content.is_empty() {
+                    format!("{block}\n")
+                } else {
+                    let sep = if content.ends_with("\n\n") {
+                        ""
+                    } else if content.ends_with('\n') {
+                        "\n"
+                    } else {
+                        "\n\n"
+                    };
+                    format!("{content}{sep}{block}\n")
+                }
+            }
+        }
+    }
+
+    /// Remove the block and the newline it leaves behind. Returns the content
+    /// unchanged if the block is absent.
+    pub fn remove(&self, content: &str) -> String {
+        match self.locate(content) {
+            Some((s, e)) => {
+                let mut end = e;
+                if content[end..].starts_with('\n') {
+                    end += 1;
+                }
+                let before = &content[..s];
+                let trimmed_before = before.trim_end_matches('\n');
+                let kept = if trimmed_before.is_empty() { "" } else { "\n" };
+                format!("{trimmed_before}{kept}{}", &content[end..])
+            }
+            None => content.to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +251,48 @@ mod tests {
             other => panic!("wrong variant: {other:?}"),
         }
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "x");
+    }
+
+    #[test]
+    fn managed_block_upsert_insert_and_replace() {
+        let mb = ManagedBlock::new("menu", CommentStyle::Hash);
+        let base = "existing line
+";
+        let once = mb.upsert(base, "body v1");
+        assert!(once.starts_with(
+            "existing line
+"
+        ));
+        assert!(mb.contains(&once));
+        assert!(once.contains("body v1"));
+        // upsert again replaces in place — idempotent, single block.
+        let twice = mb.upsert(&once, "body v2");
+        assert_eq!(twice.matches("omarchy-studio:menu").count(), 2); // open + close only
+        assert!(twice.contains("existing line"));
+        assert!(twice.contains("body v2"));
+        assert!(!twice.contains("body v1"));
+    }
+
+    #[test]
+    fn managed_block_remove_is_clean_and_reversible() {
+        let mb = ManagedBlock::new("geometry", CommentStyle::CBlock);
+        let base = "@import \"theme.css\";\n";
+        let with = mb.upsert(base, "* { margin: 0 }");
+        assert!(with.contains("/* >>> omarchy-studio:geometry"));
+        let without = mb.remove(&with);
+        assert_eq!(without, base, "remove should restore the original bytes");
+        // removing an absent block is a no-op.
+        assert_eq!(mb.remove(base), base);
+    }
+
+    #[test]
+    fn managed_block_leaves_foreign_content_untouched() {
+        let mb = ManagedBlock::new("menu", CommentStyle::Hash);
+        let foreign = "show_system_menu() {\n  :\n}\n";
+        let with = mb.upsert(foreign, "show_style_menu() { :; }");
+        // foreign function survives verbatim
+        assert!(with.contains("show_system_menu() {\n  :\n}"));
+        let back = mb.remove(&with);
+        assert_eq!(back, foreign);
     }
 }

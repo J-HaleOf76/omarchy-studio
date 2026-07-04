@@ -9,7 +9,7 @@ use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::deps::{probe_all, DepStatus, Registry};
 use studio_core::modules::themes::{slugify, ThemeOrigin, ThemeStore};
 use studio_core::omarchy::{cmds, Capabilities, OmarchyPaths};
-use studio_core::snapshot::SnapshotStore;
+use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -27,6 +27,8 @@ fn main() {
         ["doctor", rest @ ..] => doctor(rest.contains(&"--deps")),
         ["theme", rest @ ..] => theme(rest),
         ["snapshot", rest @ ..] => snapshot(rest),
+        ["install-integration"] => install_integration(),
+        ["uninstall"] => uninstall(),
         [other, ..] => {
             eprintln!("unknown command `{other}` — see `omarchy-studio` for the list");
             2
@@ -271,6 +273,74 @@ fn snapshot(args: &[&str]) -> i32 {
         _ => {
             eprintln!("usage: omarchy-studio snapshot list | undo | restore <id>");
             2
+        }
+    }
+}
+
+// ── menu integration ─────────────────────────────────────────────────────────
+
+fn install_integration() -> i32 {
+    let Some(paths) = omarchy() else { return 4 };
+    let store = history().ok();
+    let file = studio_core::integration::managed_file(&paths);
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            "before install-integration",
+            std::slice::from_ref(&file),
+            "integration",
+            &[],
+        );
+    }
+    match studio_core::integration::install_menu(&paths) {
+        Ok(path) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    "install-integration",
+                    std::slice::from_ref(&path),
+                    "integration",
+                    &[],
+                );
+            }
+            println!("Added Studio to the Omarchy menu.");
+            println!("  Open it with Super+Alt+Space -> Style -> Studio.");
+            println!("  {}", path.display());
+            println!("Undo any time with: omarchy-studio uninstall");
+            0
+        }
+        Err(e) => {
+            eprintln!("install failed: {e:?}");
+            1
+        }
+    }
+}
+
+fn uninstall() -> i32 {
+    let Some(paths) = omarchy() else { return 4 };
+    if !studio_core::integration::is_installed(&paths) {
+        println!("Studio was not installed in the Omarchy menu; nothing to remove.");
+        return 0;
+    }
+    let store = history().ok();
+    let file = studio_core::integration::managed_file(&paths);
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            "before uninstall",
+            std::slice::from_ref(&file),
+            "integration",
+            &[],
+        );
+    }
+    match studio_core::integration::uninstall_menu(&paths) {
+        Ok(_) => {
+            println!("Removed Studio from the Omarchy menu. Your other configs are untouched.");
+            0
+        }
+        Err(e) => {
+            eprintln!("uninstall failed: {e:?}");
+            1
         }
     }
 }
