@@ -1,0 +1,109 @@
+# Omarchy Studio — integrations & dependency registry (spec 06)
+# Embedded at build time; users overlay ~/.config/omarchy-studio/integrations.toml (merged by id, user wins).
+# `reason` and `fallback` are USER-facing copy — plain language, no package-ese.
+
+# ── dependencies ─────────────────────────────────────────────────────────────
+
+[deps.git]
+kind = "binary"
+probe = "git"
+package = "git"
+repo = "official"
+reason = "Powers Studio's snapshot history and one-key undo"
+unlocks = ["snapshots"]
+fallback = "Undo/history disabled; every change asks for explicit confirmation instead."
+
+[deps.mpvpaper-rs]
+kind = "binary"
+probe = "mpvpaper-rs"
+package = "mpvpaper-rs"
+repo = "aur"
+reason = "Plays video wallpapers behind your desktop"
+unlocks = ["wallpapers.video"]
+fallback = "Video files are listed but greyed out; images and GIFs still work."
+
+[deps.swww]
+kind = "binary"
+probe = "swww"
+package = "swww"
+repo = "official"
+reason = "Animates GIF wallpapers"
+unlocks = ["wallpapers.gif"]
+fallback = "GIFs are set as static images."
+
+[deps.terminal-graphics]
+kind = "terminal-graphics"
+reason = "Shows image thumbnails (theme previews, wallhaven) right in the terminal"
+unlocks = ["previews.images", "wallhaven.grid"]
+fallback = "Color swatches and text lists instead; press o to open images in imv."
+
+[deps.network]
+kind = "network"
+reason = "Browses wallhaven.cc for wallpapers"
+unlocks = ["wallhaven"]
+fallback = "Wallhaven shows an offline notice; everything local keeps working."
+
+[deps.aur-helper]
+kind = "binary"
+probe = "yay"
+probe-alt = ["paru"]
+reason = "Installs AUR packages for you from inside Studio"
+unlocks = ["guided-install.aur"]
+fallback = "Install commands are shown as manual steps to copy."
+
+[deps.gh]
+kind = "binary"
+probe = "gh"
+package = "github-cli"
+repo = "official"
+reason = "Publishes your exported theme to GitHub in one step"
+unlocks = ["themes.export.github"]
+fallback = "Export prints the git commands to publish manually."
+
+[deps.wl-copy]
+kind = "binary"
+probe = "wl-copy"
+package = "wl-clipboard"
+repo = "official"
+reason = "Copies commands and colors to your clipboard"
+unlocks = ["clipboard"]
+fallback = "Text is displayed for manual copying."
+
+# ── companion tools (detect + interop, never required) ───────────────────────
+
+[tools.aether]
+probe = "aether"
+homepage = "https://github.com/bjarneo/aether"
+install = "yay -S aether"
+license = "MIT"
+interop = "themes"
+actions = [
+  { id = "open", label = "Open in Aether (image filters & advanced extraction)", exec = "aether", context = "wallpapers" },
+]
+
+[tools.omarchist]
+probe = "omarchist"
+homepage = "https://github.com/tahayvr/omarchist"
+install = "yay -S omarchist-bin"
+license = "Apache-2.0"
+interop = "themes"
+actions = [
+  { id = "open", label = "Open in Omarchist", exec = "omarchist" },
+]
+
+[tools.matugen]
+probe = "matugen"
+homepage = "https://github.com/InioX/matugen"
+install = "yay -S matugen"
+interop = "palette"
+actions = [
+  { id = "material", label = "Generate Material You palette with matugen", exec = "matugen", context = "extraction" },
+]
+
+[tools.hyprmon]
+probe = "hyprmon"
+homepage = "https://github.com/erans/hyprmon"
+install = "yay -S hyprmon"
+actions = [
+  { id = "monitors", label = "Configure monitors (hyprmon)", exec = "hyprmon", context = "setup" },
+]

@@ -1,0 +1,9 @@
+[package]
+name = "studio-core"
+description = "Engine for Omarchy Studio: config model, parsers, apply pipeline, snapshots, Omarchy adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Intentionally empty at scaffold stage — see workspace Cargo.toml for the plan.

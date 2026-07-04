@@ -1,0 +1,13 @@
+[package]
+name = "omarchy-studio"
+description = "One-stop theming cockpit for Omarchy — TUI + CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "omarchy-studio"
+path = "src/main.rs"
+
+[dependencies]
+studio-core = { workspace = true }
