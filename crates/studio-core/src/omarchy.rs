@@ -190,6 +190,18 @@ pub mod cmds {
         Cmd::new("omarchy-theme-refresh")
     }
 
+    /// Idempotent full theme apply — Omarchy's own pipeline, never ours.
+    pub fn theme_set(slug: &str) -> Cmd {
+        Cmd::new("omarchy-theme-set").arg(slug)
+    }
+
+    /// Re-apply current theme without touching the wallpaper (env guard).
+    pub fn theme_set_keep_bg(slug: &str) -> Cmd {
+        Cmd::new("omarchy-theme-set")
+            .arg(slug)
+            .env("OMARCHY_THEME_SKIP_BACKGROUND", "1")
+    }
+
     pub fn makoctl_reload() -> Cmd {
         Cmd::new("makoctl").arg("reload")
     }

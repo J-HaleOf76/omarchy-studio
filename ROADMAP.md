@@ -7,9 +7,9 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.1.1 Error taxonomy + `Cmd` runner with timeout/capture/dry-run [01 §4, 02 §2]
 - [x] 0.1.2 `omarchy::paths` + capability probe [02 §1, §5] *(on-disk probe cache deferred to 0.1.5 with toml_edit — probe is <20 ms)*
 - [x] 0.1.3 Snapshot store: init, pre/post commits, restore, drift commits, undo-last; `configfs::atomic_write` landed alongside [03 §5–6]
-- [ ] 0.1.4 Apply pipeline core (plan → snapshot → write → reload → verify → rollback) [01 §3]
-- [ ] 0.1.5 `colors.toml` model + toml_edit round-trip + palette math (HSL, WCAG) [04 §1–2]
-- [ ] 0.1.6 Theme listing/apply/fork (overlay semantics) [04 §1]
+- [x] 0.1.4 Apply pipeline core (drift-check → pre → hash-guarded write → reload → verify → post | rollback) [01 §3]
+- [x] 0.1.5 `colors.toml` model + toml_edit round-trip + palette math (HSL, WCAG) [04 §1–2]
+- [x] 0.1.6 Theme listing/apply/fork (overlay semantics) [04 §1]
 - [ ] 0.1.7 TUI shell: rail, keybar, help overlay, command palette index [07 §1–3]
 - [ ] 0.1.8 Themes screen: browser with swatch strips; apply; fork [07, 04]
 - [ ] 0.1.9 Palette editor + scratch-theme live preview loop [04 §2]

@@ -6,4 +6,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# Intentionally empty at scaffold stage — see workspace Cargo.toml for the plan.
+toml_edit = { workspace = true }
