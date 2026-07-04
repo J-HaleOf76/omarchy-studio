@@ -329,7 +329,7 @@ mod tests {
             .record(
                 SnapshotKind::Genesis,
                 "pre-Studio state",
-                &[f.clone()],
+                std::slice::from_ref(&f),
                 "studio",
                 &[],
             )
@@ -340,7 +340,7 @@ mod tests {
             .record(
                 SnapshotKind::Post,
                 "blur.size 8→12",
-                &[f.clone()],
+                std::slice::from_ref(&f),
                 "m4",
                 &[("Setting".into(), "blur.size".into())],
             )
@@ -364,13 +364,19 @@ mod tests {
         let f = dir.join("a.conf");
         std::fs::write(&f, "same\n").unwrap();
         let id1 = s
-            .record(SnapshotKind::Pre, "first", &[f.clone()], "m", &[])
+            .record(
+                SnapshotKind::Pre,
+                "first",
+                std::slice::from_ref(&f),
+                "m",
+                &[],
+            )
             .unwrap();
         let id2 = s
             .record(
                 SnapshotKind::Pre,
                 "second, no changes",
-                &[f.clone()],
+                std::slice::from_ref(&f),
                 "m",
                 &[],
             )
@@ -385,11 +391,17 @@ mod tests {
         let s = store(&dir);
         let f = dir.join("a.conf");
         std::fs::write(&f, "clean\n").unwrap();
-        s.record(SnapshotKind::Post, "applied", &[f.clone()], "m", &[])
-            .unwrap();
-        assert!(s.detect_drift(&[f.clone()]).is_empty());
+        s.record(
+            SnapshotKind::Post,
+            "applied",
+            std::slice::from_ref(&f),
+            "m",
+            &[],
+        )
+        .unwrap();
+        assert!(s.detect_drift(std::slice::from_ref(&f)).is_empty());
         std::fs::write(&f, "hand edit\n").unwrap();
-        assert_eq!(s.detect_drift(&[f.clone()]), vec![f]);
+        assert_eq!(s.detect_drift(std::slice::from_ref(&f)), vec![f]);
     }
 
     #[test]
@@ -399,11 +411,23 @@ mod tests {
         let f = dir.join("a.conf");
         std::fs::write(&f, "v1\n").unwrap();
         let genesis = s
-            .record(SnapshotKind::Genesis, "start", &[f.clone()], "m", &[])
+            .record(
+                SnapshotKind::Genesis,
+                "start",
+                std::slice::from_ref(&f),
+                "m",
+                &[],
+            )
             .unwrap();
         std::fs::write(&f, "v2\n").unwrap();
-        s.record(SnapshotKind::Post, "change", &[f.clone()], "m", &[])
-            .unwrap();
+        s.record(
+            SnapshotKind::Post,
+            "change",
+            std::slice::from_ref(&f),
+            "m",
+            &[],
+        )
+        .unwrap();
 
         let restored = s.restore(&genesis).unwrap();
         assert_eq!(restored, vec![f.clone()]);
@@ -421,11 +445,23 @@ mod tests {
         let f = dir.join("a.conf");
         std::fs::write(&f, "before\n").unwrap();
         // apply protocol: pre → mutate → post
-        s.record(SnapshotKind::Pre, "about to apply", &[f.clone()], "m", &[])
-            .unwrap();
+        s.record(
+            SnapshotKind::Pre,
+            "about to apply",
+            std::slice::from_ref(&f),
+            "m",
+            &[],
+        )
+        .unwrap();
         std::fs::write(&f, "after\n").unwrap();
-        s.record(SnapshotKind::Post, "applied", &[f.clone()], "m", &[])
-            .unwrap();
+        s.record(
+            SnapshotKind::Post,
+            "applied",
+            std::slice::from_ref(&f),
+            "m",
+            &[],
+        )
+        .unwrap();
 
         s.undo_last().unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "before\n");

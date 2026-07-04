@@ -391,8 +391,14 @@ mod tests {
 
         // Studio knows the file as "v1" (a previous post), user edited to "v2".
         std::fs::write(&f, "v1\n").unwrap();
-        s.record(SnapshotKind::Post, "earlier apply", &[f.clone()], "m", &[])
-            .unwrap();
+        s.record(
+            SnapshotKind::Post,
+            "earlier apply",
+            std::slice::from_ref(&f),
+            "m",
+            &[],
+        )
+        .unwrap();
         std::fs::write(&f, "v2 hand edit\n").unwrap();
 
         let stub = StubRunner::default()

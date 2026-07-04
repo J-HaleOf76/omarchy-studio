@@ -471,7 +471,7 @@ foreground = \"#c0caf5\"
         let mut p = store.get("tokyo-night").unwrap().palette().unwrap();
         p.set("accent", &Color::parse("#abcdef").unwrap());
 
-        let stub = StubRunner::default().with_ok(&format!("omarchy-theme-set {SCRATCH_SLUG}"), "");
+        let stub = StubRunner::default().with_ok(format!("omarchy-theme-set {SCRATCH_SLUG}"), "");
         store.preview(&p, false, &stub).unwrap();
 
         // scratch colors.toml carries the edited value…
@@ -495,7 +495,7 @@ foreground = \"#c0caf5\"
     fn preview_toggles_light_marker() {
         let store = fake_store("light-preview");
         let p = store.get("snow").unwrap().palette().unwrap();
-        let stub = StubRunner::default().with_ok(&format!("omarchy-theme-set {SCRATCH_SLUG}"), "");
+        let stub = StubRunner::default().with_ok(format!("omarchy-theme-set {SCRATCH_SLUG}"), "");
 
         store.preview(&p, true, &stub).unwrap();
         assert!(store

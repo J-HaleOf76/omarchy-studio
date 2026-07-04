@@ -109,10 +109,8 @@ impl ThemesScreen {
 
         let visible_len = self.visible().len();
         match key.code {
-            Char('j') | Down => {
-                if visible_len > 0 {
-                    self.selected = (self.selected + 1).min(visible_len - 1);
-                }
+            Char('j') | Down if visible_len > 0 => {
+                self.selected = (self.selected + 1).min(visible_len - 1)
             }
             Char('k') | Up => self.selected = self.selected.saturating_sub(1),
             Char('g') => self.selected = 0,
@@ -122,11 +120,7 @@ impl ThemesScreen {
                     return ThemeAction::Apply(slug);
                 }
             }
-            Char('f') => {
-                if self.selected_slug().is_some() {
-                    self.fork_input = Some(String::new());
-                }
-            }
+            Char('f') if self.selected_slug().is_some() => self.fork_input = Some(String::new()),
             Char('e') => {
                 if let Some(slug) = self.selected_slug() {
                     return ThemeAction::Edit(slug);
