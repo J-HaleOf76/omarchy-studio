@@ -143,6 +143,62 @@ pub enum Component {
     Btop,
 }
 
+impl Component {
+    /// The matching `omarchy-restart-*` bin — always wrapped, never reimplemented.
+    pub fn restart_bin(self) -> &'static str {
+        match self {
+            Component::Waybar => "omarchy-restart-waybar",
+            Component::Mako => "omarchy-restart-mako",
+            Component::Swayosd => "omarchy-restart-swayosd",
+            Component::Hypridle => "omarchy-restart-hypridle",
+            Component::Walker => "omarchy-restart-walker",
+            Component::Terminal => "omarchy-restart-terminal",
+            Component::Btop => "omarchy-restart-btop",
+        }
+    }
+
+    /// Process name for the post-restart alive check, where one applies.
+    pub fn process_name(self) -> Option<&'static str> {
+        match self {
+            Component::Waybar => Some("waybar"),
+            Component::Mako => Some("mako"),
+            _ => None,
+        }
+    }
+}
+
+/// Typed constructors for the reload primitives (spec 02 §2). Keeping the
+/// command names here — not in `engine` — preserves the "only this module
+/// knows Omarchy commands" rule.
+pub mod cmds {
+    use super::Component;
+    use crate::cmd::Cmd;
+
+    pub fn restart(c: Component) -> Cmd {
+        Cmd::new(c.restart_bin())
+    }
+
+    pub fn hypr_reload() -> Cmd {
+        Cmd::new("hyprctl").arg("reload")
+    }
+
+    pub fn hypr_configerrors() -> Cmd {
+        Cmd::new("hyprctl").arg("configerrors")
+    }
+
+    pub fn theme_refresh() -> Cmd {
+        Cmd::new("omarchy-theme-refresh")
+    }
+
+    pub fn makoctl_reload() -> Cmd {
+        Cmd::new("makoctl").arg("reload")
+    }
+
+    pub fn process_alive(name: &str) -> Cmd {
+        Cmd::new("pgrep").arg("-x").arg(name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
