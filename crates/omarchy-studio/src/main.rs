@@ -3,6 +3,8 @@
 //! Dispatch (spec 08): no args → TUI; subcommand → headless CLI.
 //! Hand-rolled dispatch for now; clap arrives when the tree grows (v0.2).
 
+mod tui;
+
 use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::deps::{probe_all, DepStatus, Registry};
 use studio_core::modules::themes::{slugify, ThemeOrigin, ThemeStore};
@@ -13,14 +15,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
     let code = match argv.as_slice() {
-        [] => {
-            eprintln!(
-                "omarchy-studio {} — TUI not built yet (roadmap 0.1.7).",
-                studio_core::VERSION
-            );
-            eprintln!("Available: doctor [--deps] · theme list|current|apply|fork · snapshot list|undo|restore");
-            1
-        }
+        [] => tui::run(),
         ["--version" | "-V"] => {
             println!(
                 "omarchy-studio {} (tested against omarchy {})",
