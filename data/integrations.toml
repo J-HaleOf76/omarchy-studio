@@ -16,6 +16,7 @@ fallback = "Undo/history disabled; every change asks for explicit confirmation i
 [deps.mpvpaper-rs]
 kind = "binary"
 probe = "mpvpaper-rs"
+probe-alt = ["mpvpaper"]
 package = "mpvpaper-rs"
 repo = "aur"
 reason = "Plays video wallpapers behind your desktop"
@@ -25,6 +26,7 @@ fallback = "Video files are listed but greyed out; images and GIFs still work."
 [deps.swww]
 kind = "binary"
 probe = "swww"
+probe-alt = ["awww"] # the awww fork satisfies the same role
 package = "swww"
 repo = "official"
 reason = "Animates GIF wallpapers"

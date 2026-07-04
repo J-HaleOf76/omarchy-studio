@@ -13,8 +13,8 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [ ] 0.1.7 TUI shell: rail, keybar, help overlay, command palette index [07 §1–3]
 - [ ] 0.1.8 Themes screen: browser with swatch strips; apply; fork [07, 04]
 - [ ] 0.1.9 Palette editor + scratch-theme live preview loop [04 §2]
-- [ ] 0.1.10 Dependency registry loader + probing + DepBanner widget [06 §1–3]
-- [ ] 0.1.11 CLI: `theme list/current/apply/new`, `snapshot list/restore/undo`, `doctor --deps` [08]
+- [x] 0.1.10 Dependency registry loader + probing [06 §1–3] *(DepBanner widget lands with the TUI, 0.1.7)*
+- [x] 0.1.11 CLI: `theme list/current/apply/fork`, `snapshot list/restore/undo`, `doctor --deps` [08] *(theme new --from-image lands with v0.6 extraction; known nit: SIGPIPE panic when piped to `head` — fix with the clap migration)*
 - [ ] 0.1.12 Menu-block installer (idempotent) + floating-terminal launch + `install-integration` [02 §3]
 - [ ] 0.1.13 Golden corpus vendored; round-trip CI; fmt/clippy/check jobs [09 §2, §5]
 

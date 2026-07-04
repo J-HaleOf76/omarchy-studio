@@ -1,56 +1,70 @@
 //! omarchy-studio — TUI + CLI frontends over `studio-core`.
 //!
 //! Dispatch (spec 08): no args → TUI; subcommand → headless CLI.
-//! clap/ratatui arrive with the rest of v0.1; until then this hand-rolled
-//! dispatch covers `--version` and `doctor`.
+//! Hand-rolled dispatch for now; clap arrives when the tree grows (v0.2).
 
-use studio_core::cmd::RealRunner;
-use studio_core::omarchy::{Capabilities, OmarchyPaths};
+use studio_core::cmd::{CommandRunner, RealRunner};
+use studio_core::deps::{probe_all, DepStatus, Registry};
+use studio_core::modules::themes::{slugify, ThemeOrigin, ThemeStore};
+use studio_core::omarchy::{cmds, Capabilities, OmarchyPaths};
+use studio_core::snapshot::SnapshotStore;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        None => {
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let code = match argv.as_slice() {
+        [] => {
             eprintln!(
-                "omarchy-studio {} — TUI not built yet (roadmap v0.1).",
+                "omarchy-studio {} — TUI not built yet (roadmap 0.1.7).",
                 studio_core::VERSION
             );
-            eprintln!("Available now: omarchy-studio doctor");
-            std::process::exit(1);
+            eprintln!("Available: doctor [--deps] · theme list|current|apply|fork · snapshot list|undo|restore");
+            1
         }
-        Some("--version" | "-V") => {
+        ["--version" | "-V"] => {
             println!(
                 "omarchy-studio {} (tested against omarchy {})",
                 studio_core::VERSION,
                 studio_core::TESTED_OMARCHY
             );
+            0
         }
-        Some("doctor") => doctor(),
-        Some(other) => {
-            eprintln!("unknown command `{other}` — available: --version, doctor");
-            std::process::exit(2);
+        ["doctor", rest @ ..] => doctor(rest.contains(&"--deps")),
+        ["theme", rest @ ..] => theme(rest),
+        ["snapshot", rest @ ..] => snapshot(rest),
+        [other, ..] => {
+            eprintln!("unknown command `{other}` — see `omarchy-studio` for the list");
+            2
         }
+    };
+    std::process::exit(code);
+}
+
+fn omarchy() -> Option<OmarchyPaths> {
+    let paths = OmarchyPaths::discover().ok()?;
+    if paths.installed() {
+        Some(paths)
+    } else {
+        eprintln!(
+            "no Omarchy install at {} (set $OMARCHY_PATH if it lives elsewhere).",
+            paths.system.display()
+        );
+        None
     }
 }
 
-/// Environment report (roadmap 0.1.2; grows drift/clobber/deps checks with
-/// 0.1.10–0.1.11). Exit codes per spec 08: 0 ok, 4 omarchy not found.
-fn doctor() {
-    let paths = match OmarchyPaths::discover() {
-        Ok(p) => p,
-        Err(_) => {
-            eprintln!("doctor: HOME is not set — cannot locate an Omarchy install.");
-            std::process::exit(4);
-        }
-    };
-    if !paths.installed() {
-        eprintln!(
-            "doctor: no Omarchy install at {} (set $OMARCHY_PATH if it lives elsewhere).",
-            paths.system.display()
-        );
-        std::process::exit(4);
-    }
+fn history() -> Result<SnapshotStore, i32> {
+    let state = studio_core::studio_state_dir();
+    SnapshotStore::open_or_init(state.join("history"), Box::new(RealRunner)).map_err(|e| {
+        eprintln!("snapshot store unavailable: {e:?}");
+        1
+    })
+}
 
+// ── doctor ──────────────────────────────────────────────────────────────────
+
+fn doctor(with_deps: bool) -> i32 {
+    let Some(paths) = omarchy() else { return 4 };
     let caps = Capabilities::probe(&paths, &RealRunner);
     let theme = paths
         .current_theme_name()
@@ -99,5 +113,169 @@ fn doctor() {
         println!("  ⚠ your Omarchy checkout has local modifications.");
         println!("    These will conflict when `omarchy-update` pulls. Consider moving");
         println!("    patches into ~/.config/omarchy/ override surfaces (hooks, themed/).");
+    }
+
+    if with_deps {
+        println!();
+        println!("  dependencies");
+        match Registry::builtin() {
+            Ok(reg) => {
+                for r in probe_all(&reg, &RealRunner) {
+                    let state = match r.status {
+                        DepStatus::Present => "ok      ".into(),
+                        DepStatus::Missing => "MISSING ".into(),
+                        DepStatus::Deferred => "deferred".into(),
+                        DepStatus::Degraded(ref why) => format!("degraded ({why})"),
+                    };
+                    println!("    {:<18} {}  — {}", r.id, state, r.reason);
+                    if r.status == DepStatus::Missing {
+                        if let Some(install) = &r.install {
+                            println!("    {:<18} install: {}", "", install);
+                        }
+                        println!("    {:<18} without it: {}", "", r.fallback);
+                    }
+                }
+            }
+            Err(e) => println!("    registry failed to load: {e:?}"),
+        }
+    }
+    0
+}
+
+// ── theme ───────────────────────────────────────────────────────────────────
+
+fn theme(args: &[&str]) -> i32 {
+    let Some(paths) = omarchy() else { return 4 };
+    let store = ThemeStore::from_paths(&paths);
+    match args {
+        ["list"] => {
+            let current = paths.current_theme_name().unwrap_or_default();
+            for t in store.list() {
+                let marker = if t.slug == current { "*" } else { " " };
+                let origin = match t.origin {
+                    ThemeOrigin::System => "",
+                    ThemeOrigin::User => " (user)",
+                    ThemeOrigin::Overlay => " (user overlay)",
+                };
+                let light = if t.light() { " · light" } else { "" };
+                println!("{marker} {:<24}{origin}{light}", t.pretty);
+            }
+            0
+        }
+        ["current"] => match paths.current_theme_name() {
+            Ok(name) => {
+                println!("{name}");
+                0
+            }
+            Err(_) => {
+                eprintln!("no current theme recorded (is Omarchy fully set up?)");
+                1
+            }
+        },
+        ["apply", name] => {
+            let slug = slugify(name);
+            if store.get(&slug).is_none() {
+                eprintln!("no theme named `{slug}` — see `omarchy-studio theme list`");
+                return 1;
+            }
+            match RealRunner.run(&cmds::theme_set(&slug)) {
+                Ok(out) if out.ok() => {
+                    println!("applied {slug}");
+                    0
+                }
+                Ok(out) => {
+                    eprintln!("omarchy-theme-set failed: {}", out.stderr.trim());
+                    1
+                }
+                Err(e) => {
+                    eprintln!("could not run omarchy-theme-set: {e:?}");
+                    1
+                }
+            }
+        }
+        ["fork", src, new] => {
+            let Some(theme) = store.get(&slugify(src)) else {
+                eprintln!("no theme named `{}` to fork", slugify(src));
+                return 1;
+            };
+            match store.fork(&theme, new) {
+                Ok(t) => {
+                    let dest = t
+                        .user_dir
+                        .as_deref()
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_default();
+                    println!("forked {} → {} at {}", theme.slug, t.slug, dest);
+                    println!("apply it with: omarchy-studio theme apply {}", t.slug);
+                    0
+                }
+                Err(e) => {
+                    eprintln!("fork failed: {e:?}");
+                    1
+                }
+            }
+        }
+        _ => {
+            eprintln!(
+                "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new>"
+            );
+            2
+        }
+    }
+}
+
+// ── snapshot ────────────────────────────────────────────────────────────────
+
+fn snapshot(args: &[&str]) -> i32 {
+    let store = match history() {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    match args {
+        ["list"] => {
+            let entries = store.list(30).unwrap_or_default();
+            if entries.is_empty() {
+                println!("no snapshots yet — they appear when Studio first changes a file");
+                return 0;
+            }
+            for e in entries {
+                let kind = e
+                    .kind
+                    .map(|k| format!("{k:?}").to_lowercase())
+                    .unwrap_or_else(|| "?".into());
+                println!("{}  {:<8} {}  ({})", e.id, kind, e.summary, e.timestamp);
+            }
+            0
+        }
+        ["undo"] => {
+            match store.undo_last() {
+                Ok(files) => {
+                    println!("restored {} file(s):", files.len());
+                    for f in files {
+                        println!("  {}", f.display());
+                    }
+                    println!("note: reload affected apps (e.g. hyprctl reload) if changes aren't visible");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("{e:?}");
+                    1
+                }
+            }
+        }
+        ["restore", id] => match store.restore(id) {
+            Ok(files) => {
+                println!("restored state as of {id} ({} file(s))", files.len());
+                0
+            }
+            Err(e) => {
+                eprintln!("restore failed: {e:?}");
+                1
+            }
+        },
+        _ => {
+            eprintln!("usage: omarchy-studio snapshot list | undo | restore <id>");
+            2
+        }
     }
 }
