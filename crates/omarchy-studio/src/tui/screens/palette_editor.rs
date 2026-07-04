@@ -71,16 +71,12 @@ impl PaletteEditor {
         if let Some(buf) = self.edit.as_mut() {
             match key.code {
                 Enter => {
-                    let text = buf.clone();
-                    match PColor::parse(&text) {
-                        Ok(c) => {
-                            self.edit = None;
-                            self.working.set(self.key(), &c);
-                            self.dirty = true;
-                            return EditorAction::Preview;
-                        }
-                        // Keep the field open on a bad value; the strip shows it.
-                        Err(_) => {}
+                    // Keep the field open on a bad value; the strip shows it.
+                    if let Ok(c) = PColor::parse(buf) {
+                        self.edit = None;
+                        self.working.set(self.key(), &c);
+                        self.dirty = true;
+                        return EditorAction::Preview;
                     }
                 }
                 Esc => self.edit = None,

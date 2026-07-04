@@ -683,34 +683,6 @@ fn subsequence(needle: &str, hay: &str) -> bool {
     needle.chars().all(|c| chars.any(|h| h == c))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fuzzy_subsequence_matches_in_order() {
-        assert!(subsequence("tn", "tokyo night"));
-        assert!(subsequence("cat", "catppuccin latte"));
-        assert!(subsequence("", "anything"));
-        assert!(subsequence("lumon", "theme lumon lumon"));
-        // out of order or absent chars fail
-        assert!(!subsequence("nt", "tn"));
-        assert!(!subsequence("xyz", "tokyo night"));
-    }
-
-    #[test]
-    fn screen_cycle_wraps_both_directions() {
-        // ALL is the canonical rail order; first is Themes, last is Doctor.
-        assert_eq!(Screen::ALL[0], Screen::Themes);
-        assert_eq!(*Screen::ALL.last().unwrap(), Screen::Doctor);
-        // every screen has a non-empty label and arriving milestone
-        for s in Screen::ALL {
-            assert!(!s.label().is_empty());
-            assert!(!s.arriving().is_empty());
-        }
-    }
-}
-
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width.saturating_sub(2));
     let h = h.min(area.height.saturating_sub(2));
@@ -767,6 +739,34 @@ pub fn run() -> i32 {
         Err(e) => {
             eprintln!("terminal error: {e}");
             1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fuzzy_subsequence_matches_in_order() {
+        assert!(subsequence("tn", "tokyo night"));
+        assert!(subsequence("cat", "catppuccin latte"));
+        assert!(subsequence("", "anything"));
+        assert!(subsequence("lumon", "theme lumon lumon"));
+        // out of order or absent chars fail
+        assert!(!subsequence("nt", "tn"));
+        assert!(!subsequence("xyz", "tokyo night"));
+    }
+
+    #[test]
+    fn screen_cycle_wraps_both_directions() {
+        // ALL is the canonical rail order; first is Themes, last is Doctor.
+        assert_eq!(Screen::ALL[0], Screen::Themes);
+        assert_eq!(*Screen::ALL.last().unwrap(), Screen::Doctor);
+        // every screen has a non-empty label and arriving milestone
+        for s in Screen::ALL {
+            assert!(!s.label().is_empty());
+            assert!(!s.arriving().is_empty());
         }
     }
 }

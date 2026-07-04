@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable + fmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Formatting and lints are hard gates (spec 09 §5).
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+      - name: clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # studio-core tests are hermetic: they use StubRunner or portable
+      # commands (git, sh, echo) and temp dirs — no Omarchy needed.
+      - name: test
+        run: cargo test --workspace
+
+      # Guardrail: only the omarchy adapter may name Omarchy paths (spec 02 §6).
+      - name: adapter boundary
+        run: |
+          leak=$(grep -rn "local/share/omarchy" crates/studio-core/src \
+            --include='*.rs' | grep -v 'src/omarchy' || true)
+          if [ -n "$leak" ]; then
+            echo "Omarchy path referenced outside the adapter:" >&2
+            echo "$leak" >&2
+            exit 1
+          fi

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 pub enum StudioError {
     /// A feature's external requirement is absent. Carries everything the
     /// frontend needs to render guidance (spec 06).
-    MissingDependency(crate::deps::DepReport),
+    MissingDependency(Box<crate::deps::DepReport>),
     /// A config file failed to parse; `hint` is user-language.
     ParseFailed {
         file: PathBuf,
