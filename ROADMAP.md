@@ -6,7 +6,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 - [x] 0.1.1 Error taxonomy + `Cmd` runner with timeout/capture/dry-run [01 §4, 02 §2]
 - [x] 0.1.2 `omarchy::paths` + capability probe [02 §1, §5] *(on-disk probe cache deferred to 0.1.5 with toml_edit — probe is <20 ms)*
-- [ ] 0.1.3 Snapshot store: init, pre/post commits, restore, drift commits [03 §6]
+- [x] 0.1.3 Snapshot store: init, pre/post commits, restore, drift commits, undo-last; `configfs::atomic_write` landed alongside [03 §5–6]
 - [ ] 0.1.4 Apply pipeline core (plan → snapshot → write → reload → verify → rollback) [01 §3]
 - [ ] 0.1.5 `colors.toml` model + toml_edit round-trip + palette math (HSL, WCAG) [04 §1–2]
 - [ ] 0.1.6 Theme listing/apply/fork (overlay semantics) [04 §1]
