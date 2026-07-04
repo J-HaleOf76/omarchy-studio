@@ -31,7 +31,10 @@ pub enum StudioError {
         action: String,
     },
     /// External command failed (captured stderr in `detail`).
-    External { cmd: String, detail: String },
+    External {
+        cmd: String,
+        detail: String,
+    },
     Io(std::io::Error),
 }
 
