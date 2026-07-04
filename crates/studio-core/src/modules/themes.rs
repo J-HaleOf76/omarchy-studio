@@ -164,7 +164,8 @@ impl ThemeStore {
     }
 
     /// Union of system + user themes, deduped by slug, sorted. Same
-    /// semantics as `omarchy-theme-list` + the Walker picker.
+    /// semantics as `omarchy-theme-list` + the Walker picker. Dot-prefixed
+    /// dirs (the live-preview scratch, [`SCRATCH_SLUG`]) are hidden.
     pub fn list(&self) -> Vec<Theme> {
         let mut slugs: Vec<String> = Vec::new();
         for dir in [&self.system_dir, &self.user_dir] {
@@ -172,7 +173,7 @@ impl ThemeStore {
                 for e in entries.flatten() {
                     if e.path().is_dir() {
                         let slug = e.file_name().to_string_lossy().to_string();
-                        if !slugs.contains(&slug) {
+                        if !slug.starts_with('.') && !slugs.contains(&slug) {
                             slugs.push(slug);
                         }
                     }
@@ -225,7 +226,52 @@ impl ThemeStore {
             detail: "fork copied nothing — source theme is empty".into(),
         })
     }
+
+    fn scratch_dir(&self) -> PathBuf {
+        self.user_dir.join(SCRATCH_SLUG)
+    }
+
+    /// Live-preview `palette` on the desktop without disturbing the real theme
+    /// (spec 04 §2). Writes a minimal scratch theme (just `colors.toml`, plus a
+    /// `light.mode` marker when `light`) and applies it with the wallpaper
+    /// pinned. Templates regenerate every app's colors from `colors.toml`, so
+    /// this is enough for an accurate color preview and stays cheap enough to
+    /// run on each edit.
+    pub fn preview(
+        &self,
+        palette: &Palette,
+        light: bool,
+        runner: &dyn crate::cmd::CommandRunner,
+    ) -> Result<()> {
+        let dir = self.scratch_dir();
+        std::fs::create_dir_all(&dir)?;
+        crate::configfs::atomic_write(&dir.join("colors.toml"), &palette.to_string())?;
+        let light_marker = dir.join("light.mode");
+        if light {
+            if !light_marker.exists() {
+                std::fs::write(&light_marker, "# omarchy-studio live preview\n")?;
+            }
+        } else if light_marker.exists() {
+            std::fs::remove_file(&light_marker)?;
+        }
+        let out = runner.run(&crate::omarchy::cmds::theme_set_keep_bg(SCRATCH_SLUG))?;
+        if !out.ok() {
+            return Err(StudioError::External {
+                cmd: format!("omarchy-theme-set {SCRATCH_SLUG}"),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Remove the scratch preview theme. Call when leaving the editor.
+    pub fn cleanup_preview(&self) {
+        let _ = std::fs::remove_dir_all(self.scratch_dir());
+    }
 }
+
+/// Hidden slug used for the live-preview scratch theme.
+pub const SCRATCH_SLUG: &str = ".studio-preview";
 
 /// `"Tokyo Night"` → `tokyo-night` (same normalization as omarchy-theme-set).
 pub fn slugify(name: &str) -> String {
@@ -417,5 +463,51 @@ foreground = \"#c0caf5\"
         let stub = StubRunner::default().with_ok("omarchy-theme-set tokyo-night", "");
         stub.run(&cmds::theme_set("tokyo-night")).unwrap();
         assert_eq!(stub.calls(), vec!["omarchy-theme-set tokyo-night"]);
+    }
+
+    #[test]
+    fn preview_writes_scratch_and_applies_it() {
+        let store = fake_store("preview");
+        let mut p = store.get("tokyo-night").unwrap().palette().unwrap();
+        p.set("accent", &Color::parse("#abcdef").unwrap());
+
+        let stub = StubRunner::default().with_ok(&format!("omarchy-theme-set {SCRATCH_SLUG}"), "");
+        store.preview(&p, false, &stub).unwrap();
+
+        // scratch colors.toml carries the edited value…
+        let scratch = store.user_dir.join(SCRATCH_SLUG).join("colors.toml");
+        assert!(std::fs::read_to_string(&scratch)
+            .unwrap()
+            .contains("#abcdef"));
+        // …and we applied it with the wallpaper pinned.
+        assert_eq!(
+            stub.calls(),
+            vec![format!("omarchy-theme-set {SCRATCH_SLUG}")]
+        );
+        // scratch theme is hidden from the browser…
+        assert!(!store.list().iter().any(|t| t.slug == SCRATCH_SLUG));
+        // …and cleanup removes it.
+        store.cleanup_preview();
+        assert!(!store.user_dir.join(SCRATCH_SLUG).exists());
+    }
+
+    #[test]
+    fn preview_toggles_light_marker() {
+        let store = fake_store("light-preview");
+        let p = store.get("snow").unwrap().palette().unwrap();
+        let stub = StubRunner::default().with_ok(&format!("omarchy-theme-set {SCRATCH_SLUG}"), "");
+
+        store.preview(&p, true, &stub).unwrap();
+        assert!(store
+            .user_dir
+            .join(SCRATCH_SLUG)
+            .join("light.mode")
+            .exists());
+        store.preview(&p, false, &stub).unwrap();
+        assert!(!store
+            .user_dir
+            .join(SCRATCH_SLUG)
+            .join("light.mode")
+            .exists());
     }
 }

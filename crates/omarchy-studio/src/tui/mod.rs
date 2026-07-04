@@ -8,6 +8,7 @@
 
 mod theme;
 mod screens {
+    pub mod palette_editor;
     pub mod themes;
 }
 
@@ -21,6 +22,7 @@ use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::modules::themes::ThemeStore;
 use studio_core::omarchy::{cmds, OmarchyPaths};
 
+use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
 use theme::Skin;
 
@@ -93,6 +95,9 @@ struct App {
     skin: Skin,
     screen: Screen,
     themes: ThemesScreen,
+    /// Active palette editor (modal over the content pane), with the theme
+    /// slug that was showing before it opened (restored on cancel).
+    editor: Option<(PaletteEditor, String)>,
     palette: Option<CommandPalette>,
     help: bool,
     toast: Option<Toast>,
@@ -108,6 +113,7 @@ impl App {
             skin,
             screen: Screen::Themes,
             themes,
+            editor: None,
             palette: None,
             help: false,
             toast: None,
@@ -125,6 +131,11 @@ impl App {
         }
         if self.palette.is_some() {
             self.palette_key(key);
+            return;
+        }
+        // The palette editor is a focused mode: it owns all keys while open.
+        if self.editor.is_some() {
+            self.editor_key(key);
             return;
         }
 
@@ -179,8 +190,109 @@ impl App {
                 ThemeAction::None => {}
                 ThemeAction::Apply(slug) => self.apply_theme(&slug),
                 ThemeAction::Fork { src, name } => self.fork_theme(&src, &name),
+                ThemeAction::Edit(slug) => self.open_editor(&slug),
             }
         }
+    }
+
+    fn open_editor(&mut self, slug: &str) {
+        let store = ThemeStore::from_paths(&self.paths);
+        let Some(theme) = store.get(slug) else { return };
+        match PaletteEditor::open(&theme) {
+            Some(ed) => {
+                let origin = self.paths.current_theme_name().unwrap_or_default();
+                self.editor = Some((ed, origin));
+            }
+            None => {
+                self.toast = Some(Toast {
+                    text: format!("{slug} has no colors.toml to edit"),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    fn editor_key(&mut self, key: KeyEvent) {
+        let Some((ed, _)) = self.editor.as_mut() else {
+            return;
+        };
+        let store = ThemeStore::from_paths(&self.paths);
+        match ed.handle(key) {
+            EditorAction::None => {}
+            EditorAction::Preview => {
+                // Ephemeral: bypasses the snapshot pipeline by design (spec 04 §2).
+                if let Err(e) = store.preview(ed.working(), ed.light, &RealRunner) {
+                    self.toast = Some(Toast {
+                        text: format!("preview failed: {}", brief(e)),
+                        ok: false,
+                    });
+                }
+            }
+            EditorAction::Save => self.save_editor(),
+            EditorAction::Cancel => self.cancel_editor(),
+        }
+    }
+
+    fn save_editor(&mut self) {
+        let Some((ed, _)) = self.editor.take() else {
+            return;
+        };
+        let store = ThemeStore::from_paths(&self.paths);
+        let Some(theme) = store.get(&ed.slug) else {
+            return;
+        };
+        let dest = theme.writable_colors_path(&store.user_dir);
+        let result = studio_core::configfs::atomic_write(&dest, &ed.working().to_string())
+            .and_then(|_| {
+                RealRunner
+                    .run(&cmds::theme_set(&ed.slug))
+                    .map(|o| (o, dest.clone()))
+            });
+        store.cleanup_preview();
+        match result {
+            Ok((o, _)) if o.ok() => {
+                self.skin = Skin::from_current(&self.paths);
+                self.themes.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: format!("Saved & applied {}", ed.pretty),
+                    ok: true,
+                });
+            }
+            Ok((o, _)) => {
+                self.toast = Some(Toast {
+                    text: format!("saved, but apply failed: {}", o.stderr.trim()),
+                    ok: false,
+                })
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("save failed: {}", brief(e)),
+                    ok: false,
+                })
+            }
+        }
+    }
+
+    fn cancel_editor(&mut self) {
+        let Some((ed, origin)) = self.editor.take() else {
+            return;
+        };
+        let store = ThemeStore::from_paths(&self.paths);
+        store.cleanup_preview();
+        // Restore whatever was showing before we started previewing.
+        if !origin.is_empty() {
+            let _ = RealRunner.run(&cmds::theme_set(&origin));
+        }
+        self.skin = Skin::from_current(&self.paths);
+        let msg = if ed.dirty {
+            "Discarded palette edits"
+        } else {
+            "Closed palette editor"
+        };
+        self.toast = Some(Toast {
+            text: msg.into(),
+            ok: true,
+        });
     }
 
     fn cycle(&mut self, dir: i32) {
@@ -348,6 +460,10 @@ impl App {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(1), Constraint::Min(1)])
             .split(area)[1];
+        if let Some((ed, _)) = &self.editor {
+            ed.render(f, pad, &self.skin);
+            return;
+        }
         match self.screen {
             Screen::Themes => self.themes.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
@@ -387,15 +503,21 @@ impl App {
             );
             return;
         }
-        let hint = match self.screen {
-            Screen::Themes => self.themes.hint(),
-            _ => "tab/1-0 switch · / search · ? help · q quit".into(),
+        let (hint, show_globals) = match &self.editor {
+            Some((ed, _)) => (ed.hint(), false),
+            None => match self.screen {
+                Screen::Themes => (self.themes.hint(), true),
+                _ => ("tab/1-0 switch".into(), true),
+            },
         };
-        let line = Line::from(vec![
-            Span::styled(hint, self.skin.dim()),
-            Span::styled("   / search · ? help · q quit", self.skin.border()),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
+        let mut spans = vec![Span::styled(hint, self.skin.dim())];
+        if show_globals {
+            spans.push(Span::styled(
+                "   / search · ? help · q quit",
+                self.skin.border(),
+            ));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn draw_help(&self, f: &mut Frame) {
@@ -539,6 +661,19 @@ impl CommandPalette {
             })
             .collect();
         f.render_widget(List::new(items), rows[1]);
+    }
+}
+
+/// One-line rendering of a core error for a toast (no debug spew).
+fn brief(e: studio_core::StudioError) -> String {
+    use studio_core::StudioError::*;
+    match e {
+        External { detail, .. } => detail,
+        ParseFailed { hint, .. } => hint,
+        VerifyFailed { step, .. } => format!("{step} failed"),
+        MissingDependency(r) => format!("{} not available", r.id),
+        OmarchyMismatch { action, .. } => action,
+        Io(err) => err.to_string(),
     }
 }
 

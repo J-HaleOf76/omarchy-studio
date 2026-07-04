@@ -31,6 +31,8 @@ pub enum ThemeAction {
         src: String,
         name: String,
     },
+    /// Open the palette editor for `slug`.
+    Edit(String),
 }
 
 pub struct ThemesScreen {
@@ -125,6 +127,11 @@ impl ThemesScreen {
                     self.fork_input = Some(String::new());
                 }
             }
+            Char('e') => {
+                if let Some(slug) = self.selected_slug() {
+                    return ThemeAction::Edit(slug);
+                }
+            }
             _ => {}
         }
         ThemeAction::None
@@ -144,7 +151,7 @@ impl ThemesScreen {
         if self.fork_input.is_some() {
             "type a name for the new theme · enter save · esc cancel".into()
         } else {
-            "j/k move · enter apply · f fork".into()
+            "j/k move · enter apply · e edit colours · f fork".into()
         }
     }
 
