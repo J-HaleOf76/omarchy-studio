@@ -339,6 +339,49 @@ pub fn render_override_block(overrides: &[Override]) -> String {
         .join("\n")
 }
 
+// ── persistence ──────────────────────────────────────────────────────────────
+
+use crate::configfs::{atomic_write, CommentStyle, ManagedBlock};
+use crate::omarchy::OmarchyPaths;
+
+const BLOCK_SECTION: &str = "keybinds";
+
+fn override_block() -> ManagedBlock {
+    ManagedBlock::new(BLOCK_SECTION, CommentStyle::Hash)
+}
+
+/// The user's Hyprland bindings file — sourced last, so Studio's overrides
+/// there win over the Omarchy defaults (spec 05 §3).
+pub fn user_bindings_path(paths: &OmarchyPaths) -> std::path::PathBuf {
+    paths.hypr_config().join("bindings.conf")
+}
+
+/// Is a Studio override block present in the user's bindings file?
+pub fn overrides_installed(paths: &OmarchyPaths) -> bool {
+    std::fs::read_to_string(user_bindings_path(paths))
+        .map(|c| override_block().contains(&c))
+        .unwrap_or(false)
+}
+
+/// Write (or refresh) the managed override block in the user's bindings file.
+/// An empty override list removes the block entirely. Returns the file path.
+/// The caller is responsible for snapshotting first and reloading after
+/// (the apply pipeline / CLI does both).
+pub fn write_overrides(paths: &OmarchyPaths, overrides: &[Override]) -> Result<std::path::PathBuf> {
+    let path = user_bindings_path(paths);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let block = override_block();
+    let updated = if overrides.is_empty() {
+        block.remove(&existing)
+    } else {
+        let header = "# Managed by Omarchy Studio — your keybind changes live here.";
+        let body = format!("{header}\n{}", render_override_block(overrides));
+        block.upsert(&existing, &body)
+    };
+    atomic_write(&path, &updated)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,6 +529,58 @@ mod tests {
         // the rendered block itself parses back cleanly
         let doc = HyprDoc::parse(&format!("{body}\n"));
         assert_eq!(doc.binds().len(), 2); // bind + unbind both counted as bind* keys
+    }
+
+    fn fake_paths(tag: &str) -> OmarchyPaths {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "omarchy-studio-kb-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(root.join(".config/hypr")).unwrap();
+        OmarchyPaths {
+            system: root.join(".local/share/omarchy"),
+            config: root.join(".config/omarchy"),
+            state: root.join(".local/state/omarchy"),
+        }
+    }
+
+    #[test]
+    fn write_overrides_manages_a_block_and_preserves_user_binds() {
+        let paths = fake_paths("write");
+        let user = "# Application bindings\nbindd = SUPER, RETURN, Terminal, exec, foot\n";
+        std::fs::write(user_bindings_path(&paths), user).unwrap();
+        assert!(!overrides_installed(&paths));
+
+        let overrides = vec![
+            Override::Set(cb("SUPER", "B", "exec", "chromium")),
+            Override::Disable {
+                modmask: mods_to_mask("SUPER"),
+                key: "T".into(),
+            },
+        ];
+        write_overrides(&paths, &overrides).unwrap();
+        assert!(overrides_installed(&paths));
+        let after = std::fs::read_to_string(user_bindings_path(&paths)).unwrap();
+        assert!(after.contains("bindd = SUPER, RETURN, Terminal, exec, foot")); // user's bind kept
+        assert!(after.contains("bind = SUPER, B, exec, chromium"));
+        assert!(after.contains("unbind = SUPER, T"));
+
+        // re-write is idempotent (single managed block)
+        write_overrides(&paths, &overrides).unwrap();
+        let twice = std::fs::read_to_string(user_bindings_path(&paths)).unwrap();
+        assert_eq!(twice.matches("omarchy-studio:keybinds").count(), 2); // open+close
+
+        // empty overrides removes the block, restoring the user's file exactly
+        write_overrides(&paths, &[]).unwrap();
+        assert!(!overrides_installed(&paths));
+        assert_eq!(
+            std::fs::read_to_string(user_bindings_path(&paths)).unwrap(),
+            user
+        );
     }
 
     #[test]

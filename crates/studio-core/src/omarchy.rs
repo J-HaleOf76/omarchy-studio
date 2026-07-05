@@ -42,6 +42,16 @@ impl OmarchyPaths {
         let p = self.config.join("current/theme.name");
         Ok(std::fs::read_to_string(p)?.trim().to_string())
     }
+
+    /// `~/.config/hypr` — the user's own Hyprland config, sourced last and thus
+    /// the right place for Studio's keybind/looknfeel overrides. Derived as a
+    /// sibling of `config` (`~/.config/omarchy` → `~/.config/hypr`).
+    pub fn hypr_config(&self) -> PathBuf {
+        self.config
+            .parent()
+            .map(|p| p.join("hypr"))
+            .unwrap_or_else(|| PathBuf::from("hypr"))
+    }
 }
 
 /// Capability probe result (spec 02 §5).

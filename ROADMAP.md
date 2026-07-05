@@ -23,7 +23,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.2.1 hyprlang line CST + byte-identical round-trip over 3 vendored real hypr configs; nested/dotted get-set, binds() accessor [03 §2]
 - [x] 0.2.2 bind model + source attribution: modmask<->names, render_chord, RuntimeBind (hyprctl -j via serde), ConfigBind from hyprlang Entry, layer-priority attribution [05 §1]
 - [x] 0.2.3 dispatcher schema: 41 Hyprland dispatchers with plain-language labels, categories, ArgKind; lookup/label_for/in_category, unknowns fall back to raw id [05 §2]
-- [ ] 0.2.4 Conflict detection + override/disable/reset writes [05 §1.2]
+- [x] 0.2.4 conflict detection + override writes: find_conflicts, ConfigBind render, Override model, write_overrides into user bindings.conf via ManagedBlock (idempotent, preserves user binds) [05 §3]
 - [ ] 0.2.5 ChordCapture widget (kitty protocol + fallback picker) [05 §1.3, 07 §4]
 - [ ] 0.2.6 Keybinds screen (table, search, edit form, jargon strip) [07]
 - [ ] 0.2.7 CLI `keybind add/remove/disable/reset/check/list` [08]
