@@ -17,3 +17,4 @@ pub mod dispatchers;
 pub mod keybinds;
 pub mod looknfeel;
 pub mod themes;
+pub mod toggles;

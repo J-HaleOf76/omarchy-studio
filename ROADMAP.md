@@ -35,7 +35,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.3.2 live hyprctl-keyword preview on every adjust + preview-active crash marker (startup reloads to discard stale live values) [05 §2]
 - [x] 0.3.3 preset loader + try(live)/apply(persist)/undo + managed section render; preset picker overlay [05 §3]
 - [x] 0.3.4 six hand-tuned presets: Omarchy default, Minimal, Cozy, Frosted glass, Performance, Focus
-- [ ] 0.3.5 Toggle-flag switches (omarchy-toggle-* wrap) [05 §2]
+- [x] 0.3.5 behavior toggles: core registry wrapping omarchy-*-toggle scripts (state via omarchy-hyprland-toggle-enabled), TUI toggle overlay (t) + CLI toggle list/<id> [05 §2]
 - [ ] 0.3.6 BezierCanvas editor behind feature flag [05 §3]
 - [x] 0.3.7 CLI looknfeel list/get/set + preset list/try/apply (snapshot-backed, live reload) [08]
 

@@ -29,6 +29,7 @@ fn main() {
         ["snapshot", rest @ ..] => snapshot(rest),
         ["looknfeel", rest @ ..] => looknfeel(rest),
         ["preset", rest @ ..] => preset(rest),
+        ["toggle", rest @ ..] => toggle(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -395,6 +396,44 @@ fn apply_looknfeel(
         Err(e) => {
             eprintln!("apply failed: {e:?}");
             1
+        }
+    }
+}
+
+fn toggle(args: &[&str]) -> i32 {
+    use studio_core::modules::toggles::{lookup, TOGGLES};
+    let Some(_paths) = omarchy() else { return 4 };
+    let state = |t: &studio_core::modules::toggles::Toggle| match t.is_on(&RealRunner) {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "—",
+    };
+    match args {
+        ["list"] | [] => {
+            for t in TOGGLES {
+                println!("{:<22} {:>3}   {}", t.id, state(t), t.label);
+            }
+            0
+        }
+        [id] => {
+            let Some(t) = lookup(id) else {
+                eprintln!("unknown toggle `{id}` — see `toggle list`");
+                return 2;
+            };
+            match t.toggle(&RealRunner) {
+                Ok(()) => {
+                    println!("Toggled {} (now {})", t.label, state(t));
+                    0
+                }
+                Err(e) => {
+                    eprintln!("toggle failed: {e:?}");
+                    1
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: toggle list | toggle <id>");
+            2
         }
     }
 }

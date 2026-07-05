@@ -208,6 +208,33 @@ pub mod cmds {
         Cmd::new("hyprctl").arg("keyword").arg(name).arg(value)
     }
 
+    // ── toggles (spec 05 §2) ─────────────────────────────────────────────────
+
+    /// Is a persistent Hyprland flag toggle currently enabled (its state file
+    /// present)? Exit 0 = present.
+    pub fn hypr_toggle_enabled(flag: &str) -> Cmd {
+        Cmd::new("omarchy-hyprland-toggle-enabled").arg(flag)
+    }
+
+    pub fn toggle_window_gaps() -> Cmd {
+        Cmd::new("omarchy-hyprland-window-gaps-toggle")
+    }
+    pub fn toggle_square_aspect() -> Cmd {
+        Cmd::new("omarchy-hyprland-window-single-square-aspect-toggle")
+    }
+    pub fn toggle_nightlight() -> Cmd {
+        Cmd::new("omarchy-toggle-nightlight")
+    }
+    pub fn toggle_idle() -> Cmd {
+        Cmd::new("omarchy-toggle-idle")
+    }
+    pub fn toggle_waybar() -> Cmd {
+        Cmd::new("omarchy-toggle-waybar")
+    }
+    pub fn toggle_notification_silencing() -> Cmd {
+        Cmd::new("omarchy-toggle-notification-silencing")
+    }
+
     pub fn theme_refresh() -> Cmd {
         Cmd::new("omarchy-theme-refresh")
     }

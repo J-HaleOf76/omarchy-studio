@@ -251,6 +251,44 @@ impl App {
                 }
                 LookFeelAction::Save => self.save_looknfeel(),
                 LookFeelAction::ResetAll => self.reset_looknfeel(),
+                LookFeelAction::OpenToggles => {
+                    use studio_core::modules::toggles::TOGGLES;
+                    let rows = TOGGLES
+                        .iter()
+                        .map(|t| screens::looknfeel::ToggleRow {
+                            id: t.id.to_string(),
+                            label: t.label.to_string(),
+                            on: t.is_on(&RealRunner),
+                        })
+                        .collect();
+                    self.looknfeel.open_toggles(rows);
+                }
+                LookFeelAction::FlipToggle(id) => {
+                    use studio_core::modules::toggles::lookup;
+                    if let Some(t) = lookup(&id) {
+                        match t.toggle(&RealRunner) {
+                            Ok(()) => {
+                                let now = t.is_on(&RealRunner);
+                                self.looknfeel.set_toggle_state(&id, now);
+                                let label = match now {
+                                    Some(true) => format!("{} on", t.label),
+                                    Some(false) => format!("{} off", t.label),
+                                    None => format!("Toggled {}", t.label),
+                                };
+                                self.toast = Some(Toast {
+                                    text: label,
+                                    ok: true,
+                                });
+                            }
+                            Err(e) => {
+                                self.toast = Some(Toast {
+                                    text: format!("toggle failed: {}", brief(e)),
+                                    ok: false,
+                                });
+                            }
+                        }
+                    }
+                }
             },
             _ => {}
         }

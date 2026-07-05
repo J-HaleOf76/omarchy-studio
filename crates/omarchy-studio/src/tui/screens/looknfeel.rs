@@ -31,6 +31,22 @@ pub enum LookFeelAction {
     Save,
     /// Reset every override and reload to the persisted config.
     ResetAll,
+    /// Open the behavior-toggles overlay (App fills in live states).
+    OpenToggles,
+    /// Flip the toggle with this id (App runs the Omarchy script).
+    FlipToggle(String),
+}
+
+/// A row in the toggles overlay: id, label, and cached on/off (None = unknown).
+pub struct ToggleRow {
+    pub id: String,
+    pub label: String,
+    pub on: Option<bool>,
+}
+
+struct ToggleOverlay {
+    rows: Vec<ToggleRow>,
+    sel: usize,
 }
 
 pub struct LookFeelScreen {
@@ -42,6 +58,8 @@ pub struct LookFeelScreen {
     pub dirty: bool,
     /// Preset picker overlay: Some(selected preset index) while open.
     picker: Option<usize>,
+    /// Behavior-toggles overlay.
+    toggles: Option<ToggleOverlay>,
 }
 
 impl LookFeelScreen {
@@ -52,6 +70,7 @@ impl LookFeelScreen {
             scroll: 0,
             dirty: false,
             picker: None,
+            toggles: None,
         }
     }
 
@@ -61,21 +80,39 @@ impl LookFeelScreen {
         self.selected = keep.min(SETTINGS.len().saturating_sub(1));
         self.dirty = false;
         self.picker = None;
+        self.toggles = None;
+    }
+
+    /// Populate + open the toggles overlay with freshly-read states.
+    pub fn open_toggles(&mut self, rows: Vec<ToggleRow>) {
+        self.toggles = Some(ToggleOverlay { rows, sel: 0 });
+    }
+
+    /// Update one toggle's cached state after a flip.
+    pub fn set_toggle_state(&mut self, id: &str, on: Option<bool>) {
+        if let Some(ov) = self.toggles.as_mut() {
+            if let Some(r) = ov.rows.iter_mut().find(|r| r.id == id) {
+                r.on = on;
+            }
+        }
     }
 
     fn cur(&self) -> &Setting {
         &SETTINGS[self.selected]
     }
 
-    /// True while a modal (the preset picker) owns input — the App suspends its
-    /// global chords so digits/letters reach us.
+    /// True while a modal (preset picker / toggles) owns input — the App
+    /// suspends its global chords so digits/letters reach us.
     pub fn is_modal(&self) -> bool {
-        self.picker.is_some()
+        self.picker.is_some() || self.toggles.is_some()
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> LookFeelAction {
         if self.picker.is_some() {
             return self.handle_picker(key);
+        }
+        if self.toggles.is_some() {
+            return self.handle_toggles(key);
         }
         let n = SETTINGS.len();
         match key.code {
@@ -83,6 +120,7 @@ impl LookFeelScreen {
                 self.picker = Some(0);
                 return LookFeelAction::None;
             }
+            KeyCode::Char('t') => return LookFeelAction::OpenToggles,
             KeyCode::Char('j') | KeyCode::Down => {
                 self.selected = (self.selected + 1).min(n - 1);
             }
@@ -150,6 +188,23 @@ impl LookFeelScreen {
         self.dirty = true;
         // preview the reverted (base/default) value live
         LookFeelAction::Preview(self.selected)
+    }
+
+    fn handle_toggles(&mut self, key: KeyEvent) -> LookFeelAction {
+        let Some(ov) = self.toggles.as_mut() else {
+            return LookFeelAction::None;
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('t') => self.toggles = None,
+            KeyCode::Char('j') | KeyCode::Down => ov.sel = (ov.sel + 1).min(ov.rows.len() - 1),
+            KeyCode::Char('k') | KeyCode::Up => ov.sel = ov.sel.saturating_sub(1),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let id = ov.rows[ov.sel].id.clone();
+                return LookFeelAction::FlipToggle(id);
+            }
+            _ => {}
+        }
+        LookFeelAction::None
     }
 
     fn handle_picker(&mut self, key: KeyEvent) -> LookFeelAction {
@@ -241,6 +296,44 @@ impl LookFeelScreen {
         if let Some(sel) = self.picker {
             self.render_picker(f, area, skin, sel);
         }
+        if let Some(ov) = &self.toggles {
+            self.render_toggles(f, area, skin, ov);
+        }
+    }
+
+    fn render_toggles(&self, f: &mut Frame, area: Rect, skin: &Skin, ov: &ToggleOverlay) {
+        let w = 48u16.min(area.width.saturating_sub(2));
+        let h = (ov.rows.len() as u16 + 2).min(area.height.saturating_sub(2));
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let rect = Rect::new(x, y, w, h);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(skin.accent_bold())
+            .title(" Behavior toggles — Enter to flip, Esc to close ");
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+        let items: Vec<ListItem> = ov
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let on = i == ov.sel;
+                let mark = match r.on {
+                    Some(true) => "[on] ",
+                    Some(false) => "[off]",
+                    None => "[ · ]",
+                };
+                let style = if on { skin.selection() } else { skin.body() };
+                ListItem::new(Line::from(vec![
+                    Span::styled(if on { "▸ " } else { "  " }, skin.accent_bold()),
+                    Span::styled(format!("{mark} "), skin.accent_bold()),
+                    Span::styled(r.label.clone(), style),
+                ]))
+            })
+            .collect();
+        f.render_widget(List::new(items), inner);
     }
 
     fn render_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
@@ -314,7 +407,7 @@ impl LookFeelScreen {
                 save,
             ]),
             Line::from(Span::styled(
-                "h/l adjust   space toggle   p presets   r reset   R reset all   s save",
+                "h/l adjust   p presets   t toggles   r reset   R reset all   s save",
                 skin.dim(),
             )),
         ])
