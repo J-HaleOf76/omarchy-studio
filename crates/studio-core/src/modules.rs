@@ -13,5 +13,6 @@
 //! | `extraction` | FR1.8 | 04 §4 | v0.6 |
 
 pub mod color;
+pub mod dispatchers;
 pub mod keybinds;
 pub mod themes;
