@@ -673,7 +673,7 @@ mod tests {
         ));
         std::fs::create_dir_all(root.join(".config/hypr")).unwrap();
         OmarchyPaths {
-            system: root.join(".local/share/omarchy"),
+            system: root.join("sys/omarchy"),
             config: root.join(".config/omarchy"),
             state: root.join(".local/state/omarchy"),
         }
