@@ -24,8 +24,8 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.2.2 bind model + source attribution: modmask<->names, render_chord, RuntimeBind (hyprctl -j via serde), ConfigBind from hyprlang Entry, layer-priority attribution [05 §1]
 - [x] 0.2.3 dispatcher schema: 41 Hyprland dispatchers with plain-language labels, categories, ArgKind; lookup/label_for/in_category, unknowns fall back to raw id [05 §2]
 - [x] 0.2.4 conflict detection + override writes: find_conflicts, ConfigBind render, Override model, write_overrides into user bindings.conf via ManagedBlock (idempotent, preserves user binds) [05 §3]
-- [ ] 0.2.5 ChordCapture widget (kitty protocol + fallback picker) [05 §1.3, 07 §4]
-- [ ] 0.2.6 Keybinds screen (table, search, edit form, jargon strip) [07]
+- [x] 0.2.5 chord capture: KeyEvent -> Hyprland chord (modmask+key name), kitty keyboard enhancement flags pushed where supported for SUPER capture [05 §4]
+- [x] 0.2.6 Keybinds screen: effective keymap from hyprctl binds -j, human labels + source attribution, rebind via live chord capture + disable, snapshot-backed override writes with live reload [05]
 - [ ] 0.2.7 CLI `keybind add/remove/disable/reset/check/list` [08]
 - [ ] 0.2.8 Verify-rollback e2e with injected configerrors [09 §3]
 

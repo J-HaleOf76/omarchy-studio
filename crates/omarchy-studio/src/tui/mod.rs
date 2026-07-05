@@ -6,8 +6,10 @@
 //! honest "arriving in <milestone>" placeholder so the shell is navigable
 //! end-to-end without pretending features exist.
 
+mod chord;
 mod theme;
 mod screens {
+    pub mod keybinds;
     pub mod palette_editor;
     pub mod themes;
 }
@@ -21,7 +23,9 @@ use ratatui::Frame;
 use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::modules::themes::ThemeStore;
 use studio_core::omarchy::{cmds, OmarchyPaths};
+use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
+use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
 use theme::Skin;
@@ -95,6 +99,7 @@ struct App {
     skin: Skin,
     screen: Screen,
     themes: ThemesScreen,
+    keybinds: KeybindsScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -108,11 +113,13 @@ impl App {
     fn new(paths: OmarchyPaths) -> Self {
         let skin = Skin::from_current(&paths);
         let themes = ThemesScreen::load(&paths);
+        let keybinds = KeybindsScreen::load(&paths, &RealRunner);
         Self {
             paths,
             skin,
             screen: Screen::Themes,
             themes,
+            keybinds,
             editor: None,
             palette: None,
             help: false,
@@ -139,8 +146,9 @@ impl App {
             return;
         }
 
-        // Global chords (only when no in-screen text field is capturing).
-        let capturing = matches!(self.screen, Screen::Themes) && self.themes.is_capturing();
+        // Global chords (only when no in-screen text/chord field is capturing).
+        let capturing = (matches!(self.screen, Screen::Themes) && self.themes.is_capturing())
+            || (matches!(self.screen, Screen::Keybinds) && self.keybinds.is_capturing());
         if !capturing {
             match key.code {
                 KeyCode::Char('q') => {
@@ -185,12 +193,60 @@ impl App {
         }
 
         // Delegate to the active screen.
-        if self.screen == Screen::Themes {
-            match self.themes.handle(key) {
+        match self.screen {
+            Screen::Themes => match self.themes.handle(key) {
                 ThemeAction::None => {}
                 ThemeAction::Apply(slug) => self.apply_theme(&slug),
                 ThemeAction::Fork { src, name } => self.fork_theme(&src, &name),
                 ThemeAction::Edit(slug) => self.open_editor(&slug),
+            },
+            Screen::Keybinds => match self.keybinds.handle(key) {
+                KeybindAction::None => {}
+                KeybindAction::Commit(summary) => self.commit_keybinds(summary),
+            },
+            _ => {}
+        }
+    }
+
+    /// Snapshot the bindings file, persist the override block, live-reload, and
+    /// refresh the screen — the full undoable apply for a keybind change.
+    fn commit_keybinds(&mut self, summary: String) {
+        let file = studio_core::modules::keybinds::user_bindings_path(&self.paths);
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                &format!("before: {summary}"),
+                std::slice::from_ref(&file),
+                "keybinds",
+                &[],
+            );
+        }
+        match self.keybinds.commit(&self.paths, &RealRunner) {
+            Ok(()) => {
+                if let Ok(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        &summary,
+                        std::slice::from_ref(&file),
+                        "keybinds",
+                        &[],
+                    );
+                }
+                self.keybinds.reload(&self.paths, &RealRunner);
+                self.toast = Some(Toast {
+                    text: format!("{summary} · undo with u on Snapshots"),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("keybind change failed: {}", brief(e)),
+                    ok: false,
+                });
             }
         }
     }
@@ -389,7 +445,7 @@ impl App {
         }
     }
 
-    fn draw(&self, f: &mut Frame) {
+    fn draw(&mut self, f: &mut Frame) {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(16), Constraint::Min(20)])
@@ -455,7 +511,7 @@ impl App {
         f.render_widget(Paragraph::new(line), area);
     }
 
-    fn draw_content(&self, f: &mut Frame, area: Rect) {
+    fn draw_content(&mut self, f: &mut Frame, area: Rect) {
         let pad = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(1), Constraint::Min(1)])
@@ -466,6 +522,7 @@ impl App {
         }
         match self.screen {
             Screen::Themes => self.themes.render(f, pad, &self.skin),
+            Screen::Keybinds => self.keybinds.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
         }
     }
@@ -713,6 +770,18 @@ pub fn run() -> i32 {
     };
 
     let mut terminal = ratatui::init();
+    // Enable Kitty keyboard flags where supported, so chord capture can see
+    // SUPER and disambiguate modifiers. No-op on terminals that lack it.
+    let kbd_enhanced = matches!(
+        ratatui::crossterm::terminal::supports_keyboard_enhancement(),
+        Ok(true)
+    );
+    if kbd_enhanced {
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::PushKeyboardEnhancementFlags(chord::enhancement_flags())
+        );
+    }
     let mut app = App::new(paths);
     let result = loop {
         if let Err(e) = terminal.draw(|f| app.draw(f)) {
@@ -733,6 +802,12 @@ pub fn run() -> i32 {
             Err(e) => break Err(e),
         }
     };
+    if kbd_enhanced {
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::PopKeyboardEnhancementFlags
+        );
+    }
     ratatui::restore();
     match result {
         Ok(()) => 0,

@@ -154,6 +154,20 @@ impl ManagedBlock {
         None
     }
 
+    /// The body between the markers (exclusive), or None if the block is
+    /// absent. Lets a caller read back what Studio previously wrote.
+    pub fn extract<'a>(&self, content: &'a str) -> Option<&'a str> {
+        let (s, e) = self.locate(content)?;
+        let inner = &content[s..e];
+        // strip the first line (open marker) and last line (close marker)
+        let after_open = inner.split_once('\n').map(|(_, r)| r).unwrap_or("");
+        let body = after_open
+            .rsplit_once('\n')
+            .map(|(b, _)| b)
+            .unwrap_or(after_open);
+        Some(body)
+    }
+
     /// Insert or replace the block, returning the new file content. Replaces in
     /// place if present; otherwise appends at end (blocks own the end of the
     /// file so later definitions win, spec 03 §4).

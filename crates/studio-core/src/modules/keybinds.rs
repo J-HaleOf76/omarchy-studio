@@ -382,6 +382,99 @@ pub fn write_overrides(paths: &OmarchyPaths, overrides: &[Override]) -> Result<s
     Ok(path)
 }
 
+/// Read Studio's existing override block back into a list of [`Override`]s, so
+/// a fresh session inherits changes the user made earlier. Absent block → empty.
+pub fn read_overrides(paths: &OmarchyPaths) -> Vec<Override> {
+    let Ok(content) = std::fs::read_to_string(user_bindings_path(paths)) else {
+        return Vec::new();
+    };
+    let Some(body) = override_block().extract(&content) else {
+        return Vec::new();
+    };
+    let doc = HyprDoc::parse(body);
+    doc.binds()
+        .iter()
+        .filter_map(|e| {
+            if e.key == "unbind" {
+                // `unbind = MODS, KEY`
+                let mut it = e.value.splitn(2, ',');
+                let mods = it.next()?.trim();
+                let key = it.next()?.trim().to_string();
+                Some(Override::Disable {
+                    modmask: mods_to_mask(mods),
+                    key,
+                })
+            } else {
+                ConfigBind::from_entry(e).map(Override::Set)
+            }
+        })
+        .collect()
+}
+
+/// Load the effective keymap: run `hyprctl binds -j`, then attribute each bind
+/// to the config layer that defines it (Omarchy defaults + the user's file).
+pub fn load_effective(
+    paths: &OmarchyPaths,
+    runner: &dyn crate::cmd::CommandRunner,
+) -> Result<Vec<AttributedBind>> {
+    let out = runner.run(&crate::omarchy::cmds::binds_json())?;
+    if !out.ok() {
+        return Err(StudioError::External {
+            cmd: "hyprctl binds -j".into(),
+            detail: if out.stderr.trim().is_empty() {
+                "is Hyprland running?".into()
+            } else {
+                out.stderr.trim().to_string()
+            },
+        });
+    }
+    let runtime = parse_runtime_binds(&out.stdout)?;
+
+    // Source layers, lowest priority first. Defaults live under $OMARCHY_PATH.
+    let mut docs: Vec<(Layer, HyprDoc)> = Vec::new();
+    let default_dir = paths.system.join("default/hypr/bindings");
+    if let Ok(entries) = std::fs::read_dir(&default_dir) {
+        let mut files: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("conf"))
+            .collect();
+        files.sort();
+        for f in files {
+            if let Ok(text) = std::fs::read_to_string(&f) {
+                docs.push((Layer::Default, HyprDoc::parse(&text)));
+            }
+        }
+    }
+    if let Ok(text) = std::fs::read_to_string(user_bindings_path(paths)) {
+        docs.push((Layer::User, HyprDoc::parse(&text)));
+    }
+    let sources: Vec<SourceFile> = docs
+        .iter()
+        .map(|(layer, doc)| SourceFile { layer: *layer, doc })
+        .collect();
+
+    Ok(attribute(&runtime, &sources))
+}
+
+/// Persist overrides and reload Hyprland so they take effect. Returns the
+/// bindings file that changed. Caller snapshots before, for undo.
+pub fn apply_overrides(
+    paths: &OmarchyPaths,
+    overrides: &[Override],
+    runner: &dyn crate::cmd::CommandRunner,
+) -> Result<std::path::PathBuf> {
+    let path = write_overrides(paths, overrides)?;
+    let out = runner.run(&crate::omarchy::cmds::hypr_reload())?;
+    if !out.ok() {
+        return Err(StudioError::External {
+            cmd: "hyprctl reload".into(),
+            detail: out.stderr.trim().to_string(),
+        });
+    }
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,6 +502,44 @@ mod tests {
         assert_eq!(binds[0].chord(), "SUPER+T");
         assert_eq!(binds[1].dispatcher, "exec");
         assert!(parse_runtime_binds("not json").is_err());
+    }
+
+    #[test]
+    fn load_effective_reads_hyprctl_and_attributes_layers() {
+        use crate::cmd::StubRunner;
+        let paths = fake_paths("effective");
+        // a default binding file under $OMARCHY_PATH, and a user override
+        let def_dir = paths.system.join("default/hypr/bindings");
+        std::fs::create_dir_all(&def_dir).unwrap();
+        std::fs::write(
+            def_dir.join("tiling.conf"),
+            "bind = SUPER, T, togglefloating,\n",
+        )
+        .unwrap();
+        std::fs::write(
+            user_bindings_path(&paths),
+            "bindd = SUPER, B, Browser, exec, chromium\n",
+        )
+        .unwrap();
+
+        let json = r#"[
+          {"modmask":64,"key":"T","dispatcher":"togglefloating","arg":"","keycode":0},
+          {"modmask":64,"key":"B","dispatcher":"exec","arg":"chromium","keycode":0},
+          {"modmask":64,"key":"P","dispatcher":"exec","arg":"plugin-only","keycode":0}
+        ]"#;
+        let runner = StubRunner::default().with_ok("hyprctl binds -j", json);
+
+        let attributed = load_effective(&paths, &runner).unwrap();
+        assert_eq!(attributed.len(), 3);
+        // SUPER+T attributed to the Omarchy default layer
+        let t = attributed.iter().find(|a| a.runtime.key == "T").unwrap();
+        assert_eq!(t.source.as_ref().unwrap().layer, Layer::Default);
+        // SUPER+B attributed to the user's own file
+        let b = attributed.iter().find(|a| a.runtime.key == "B").unwrap();
+        assert_eq!(b.source.as_ref().unwrap().layer, Layer::User);
+        // SUPER+P defined nowhere in config → no source (plugin)
+        let p = attributed.iter().find(|a| a.runtime.key == "P").unwrap();
+        assert!(p.source.is_none());
     }
 
     #[test]
@@ -581,6 +712,45 @@ mod tests {
             std::fs::read_to_string(user_bindings_path(&paths)).unwrap(),
             user
         );
+    }
+
+    #[test]
+    fn read_overrides_round_trips_the_written_block() {
+        let paths = fake_paths("readback");
+        std::fs::write(
+            user_bindings_path(&paths),
+            "# user\nbindd = SUPER, RETURN, Term, exec, foot\n",
+        )
+        .unwrap();
+        let written = vec![
+            Override::Set(cb("SUPER", "B", "exec", "chromium")),
+            Override::Disable {
+                modmask: mods_to_mask("SUPER"),
+                key: "T".into(),
+            },
+        ];
+        write_overrides(&paths, &written).unwrap();
+
+        let read = read_overrides(&paths);
+        assert_eq!(read.len(), 2);
+        match &read[0] {
+            Override::Set(cb) => {
+                assert_eq!(
+                    (cb.key.as_str(), cb.dispatcher.as_str(), cb.arg.as_str()),
+                    ("B", "exec", "chromium")
+                );
+            }
+            _ => panic!("expected Set"),
+        }
+        match &read[1] {
+            Override::Disable { modmask, key } => {
+                assert_eq!((*modmask, key.as_str()), (mods_to_mask("SUPER"), "T"));
+            }
+            _ => panic!("expected Disable"),
+        }
+        // no block → empty
+        std::fs::write(user_bindings_path(&paths), "# nothing here\n").unwrap();
+        assert!(read_overrides(&paths).is_empty());
     }
 
     #[test]

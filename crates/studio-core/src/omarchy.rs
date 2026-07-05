@@ -196,6 +196,11 @@ pub mod cmds {
         Cmd::new("hyprctl").arg("configerrors")
     }
 
+    /// Effective keybinds as JSON — ground truth for the keybinds screen.
+    pub fn binds_json() -> Cmd {
+        Cmd::new("hyprctl").arg("binds").arg("-j")
+    }
+
     pub fn theme_refresh() -> Cmd {
         Cmd::new("omarchy-theme-refresh")
     }
