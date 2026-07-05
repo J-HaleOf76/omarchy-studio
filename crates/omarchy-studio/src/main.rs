@@ -27,6 +27,8 @@ fn main() {
         ["doctor", rest @ ..] => doctor(rest.contains(&"--deps")),
         ["theme", rest @ ..] => theme(rest),
         ["snapshot", rest @ ..] => snapshot(rest),
+        ["looknfeel", rest @ ..] => looknfeel(rest),
+        ["preset", rest @ ..] => preset(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -273,6 +275,126 @@ fn snapshot(args: &[&str]) -> i32 {
         _ => {
             eprintln!("usage: omarchy-studio snapshot list | undo | restore <id>");
             2
+        }
+    }
+}
+
+// ── look & feel ───────────────────────────────────────────────────────────────
+
+fn looknfeel(args: &[&str]) -> i32 {
+    use studio_core::modules::looknfeel::{lookup, LookFeel, SETTINGS};
+    let Some(paths) = omarchy() else { return 4 };
+    match args {
+        ["list"] => {
+            let lf = LookFeel::load(&paths);
+            for s in SETTINGS {
+                let mark = if lf.is_overridden(s.key) { "*" } else { " " };
+                println!("{mark} {:<28} {:>8}   {}", s.key, lf.value(s.key), s.label);
+            }
+            println!("\n(* = changed from the Omarchy default)");
+            0
+        }
+        ["get", key] => {
+            if lookup(key).is_none() {
+                eprintln!("unknown setting `{key}` — see `looknfeel list`");
+                return 2;
+            }
+            println!("{}", LookFeel::load(&paths).value(key));
+            0
+        }
+        ["set", key, value] => {
+            let mut lf = LookFeel::load(&paths);
+            if let Err(e) = lf.set(key, value) {
+                eprintln!("{e}");
+                return 2;
+            }
+            apply_looknfeel(&paths, &lf, &format!("looknfeel {key}={}", lf.value(key)))
+        }
+        _ => {
+            eprintln!("usage: looknfeel list | get <key> | set <key> <value>");
+            2
+        }
+    }
+}
+
+fn preset(args: &[&str]) -> i32 {
+    use studio_core::modules::looknfeel::{preset as find, LookFeel, PRESETS};
+    let Some(paths) = omarchy() else { return 4 };
+    match args {
+        ["list"] => {
+            for p in PRESETS {
+                println!("{:<18} {}", p.name, p.blurb);
+            }
+            0
+        }
+        ["try", name @ ..] | ["apply", name @ ..] if !name.is_empty() => {
+            let joined = name.join(" ");
+            let Some(p) = find(&joined) else {
+                eprintln!("unknown preset `{joined}` — see `preset list`");
+                return 2;
+            };
+            let mut lf = LookFeel::load(&paths);
+            lf.apply_preset(p);
+            if matches!(args, ["apply", ..]) {
+                apply_looknfeel(&paths, &lf, &format!("preset {}", p.name))
+            } else {
+                match lf.preview_all(&RealRunner) {
+                    Ok(()) => {
+                        println!(
+                            "Trying “{}” live (not saved). Run `preset apply {}` to keep it.",
+                            p.name, p.name
+                        );
+                        0
+                    }
+                    Err(e) => {
+                        eprintln!("preview failed: {e:?}");
+                        1
+                    }
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: preset list | try <name> | apply <name>");
+            2
+        }
+    }
+}
+
+/// Snapshot the bindings-adjacent looknfeel.conf, apply the model live, and
+/// record the result — the shared save path for `looknfeel set` / `preset apply`.
+fn apply_looknfeel(
+    paths: &OmarchyPaths,
+    lf: &studio_core::modules::looknfeel::LookFeel,
+    summary: &str,
+) -> i32 {
+    let file = paths.hypr_config().join("looknfeel.conf");
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            std::slice::from_ref(&file),
+            "looknfeel",
+            &[],
+        );
+    }
+    match lf.apply(paths, &RealRunner) {
+        Ok(_) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    summary,
+                    std::slice::from_ref(&file),
+                    "looknfeel",
+                    &[],
+                );
+            }
+            println!("{summary} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("apply failed: {e:?}");
+            1
         }
     }
 }

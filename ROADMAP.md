@@ -37,7 +37,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.3.4 six hand-tuned presets: Omarchy default, Minimal, Cozy, Frosted glass, Performance, Focus
 - [ ] 0.3.5 Toggle-flag switches (omarchy-toggle-* wrap) [05 §2]
 - [ ] 0.3.6 BezierCanvas editor behind feature flag [05 §3]
-- [ ] 0.3.7 CLI `looknfeel get/set`, `preset list/try/apply` [08]
+- [x] 0.3.7 CLI looknfeel list/get/set + preset list/try/apply (snapshot-backed, live reload) [08]
 
 ## v0.4 — Waybar (~3 wks) — *exit: reorder bar + add custom module without touching JSON*
 
