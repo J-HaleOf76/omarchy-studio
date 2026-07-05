@@ -12,8 +12,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use ratatui::widgets::{Block, Borders, Clear};
+
 use studio_core::cmd::CommandRunner;
-use studio_core::modules::looknfeel::{groups, Kind, LookFeel, Setting, SETTINGS};
+use studio_core::modules::looknfeel::{groups, Kind, LookFeel, Setting, PRESETS, SETTINGS};
 use studio_core::omarchy::OmarchyPaths;
 
 use crate::tui::theme::Skin;
@@ -23,6 +25,8 @@ pub enum LookFeelAction {
     None,
     /// Preview the setting at this schema index live.
     Preview(usize),
+    /// Preview the whole batch live (after applying a preset).
+    PreviewAll,
     /// Persist the batch (App snapshots first).
     Save,
     /// Reset every override and reload to the persisted config.
@@ -36,6 +40,8 @@ pub struct LookFeelScreen {
     scroll: usize,
     /// True once anything has been previewed but not yet saved.
     pub dirty: bool,
+    /// Preset picker overlay: Some(selected preset index) while open.
+    picker: Option<usize>,
 }
 
 impl LookFeelScreen {
@@ -45,6 +51,7 @@ impl LookFeelScreen {
             selected: 0,
             scroll: 0,
             dirty: false,
+            picker: None,
         }
     }
 
@@ -53,15 +60,29 @@ impl LookFeelScreen {
         self.model = LookFeel::load(paths);
         self.selected = keep.min(SETTINGS.len().saturating_sub(1));
         self.dirty = false;
+        self.picker = None;
     }
 
     fn cur(&self) -> &Setting {
         &SETTINGS[self.selected]
     }
 
+    /// True while a modal (the preset picker) owns input — the App suspends its
+    /// global chords so digits/letters reach us.
+    pub fn is_modal(&self) -> bool {
+        self.picker.is_some()
+    }
+
     pub fn handle(&mut self, key: KeyEvent) -> LookFeelAction {
+        if self.picker.is_some() {
+            return self.handle_picker(key);
+        }
         let n = SETTINGS.len();
         match key.code {
+            KeyCode::Char('p') => {
+                self.picker = Some(0);
+                return LookFeelAction::None;
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.selected = (self.selected + 1).min(n - 1);
             }
@@ -131,6 +152,26 @@ impl LookFeelScreen {
         LookFeelAction::Preview(self.selected)
     }
 
+    fn handle_picker(&mut self, key: KeyEvent) -> LookFeelAction {
+        let Some(sel) = self.picker.as_mut() else {
+            return LookFeelAction::None;
+        };
+        match key.code {
+            KeyCode::Esc => self.picker = None,
+            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(PRESETS.len() - 1),
+            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Enter => {
+                let preset = &PRESETS[*sel];
+                self.model.apply_preset(preset);
+                self.dirty = true;
+                self.picker = None;
+                return LookFeelAction::PreviewAll;
+            }
+            _ => {}
+        }
+        LookFeelAction::None
+    }
+
     // ── IO delegated from the App (keeps the screen itself pure of runners) ──
 
     pub fn preview(
@@ -139,6 +180,10 @@ impl LookFeelScreen {
         runner: &dyn CommandRunner,
     ) -> studio_core::error::Result<()> {
         self.model.preview_one(SETTINGS[idx].key, runner)
+    }
+
+    pub fn preview_all(&self, runner: &dyn CommandRunner) -> studio_core::error::Result<()> {
+        self.model.preview_all(runner)
     }
 
     pub fn commit(
@@ -192,6 +237,44 @@ impl LookFeelScreen {
         f.render_widget(List::new(visible), rows[0]);
 
         self.render_footer(f, rows[1], skin);
+
+        if let Some(sel) = self.picker {
+            self.render_picker(f, area, skin, sel);
+        }
+    }
+
+    fn render_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
+        let w = 52u16.min(area.width.saturating_sub(2));
+        // each preset renders on two lines (name + blurb), plus the border.
+        let h = (PRESETS.len() as u16 * 2 + 2).min(area.height.saturating_sub(2));
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let rect = Rect::new(x, y, w, h);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(skin.accent_bold())
+            .title(" Presets — Enter to try, Esc to cancel ");
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+
+        let items: Vec<ListItem> = PRESETS
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let on = i == sel;
+                let name = if on {
+                    Span::styled(format!("▸ {}", p.name), skin.selection())
+                } else {
+                    Span::styled(format!("  {}", p.name), skin.body())
+                };
+                ListItem::new(vec![
+                    Line::from(name),
+                    Line::from(Span::styled(format!("    {}", p.blurb), skin.dim())),
+                ])
+            })
+            .collect();
+        f.render_widget(List::new(items), inner);
     }
 
     fn setting_row<'a>(&self, i: usize, s: &'a Setting, skin: &Skin) -> ListItem<'a> {
@@ -231,7 +314,7 @@ impl LookFeelScreen {
                 save,
             ]),
             Line::from(Span::styled(
-                "h/l adjust   space toggle   r reset   R reset all   s save",
+                "h/l adjust   space toggle   p presets   r reset   R reset all   s save",
                 skin.dim(),
             )),
         ])

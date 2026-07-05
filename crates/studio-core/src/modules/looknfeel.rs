@@ -199,6 +199,118 @@ pub fn lookup(key: &str) -> Option<&'static Setting> {
     SETTINGS.iter().find(|s| s.key == key)
 }
 
+/// A named, complete look — a batch of setting values applied together.
+#[derive(Debug, Clone, Copy)]
+pub struct Preset {
+    pub name: &'static str,
+    pub blurb: &'static str,
+    pub values: &'static [(&'static str, &'static str)],
+}
+
+/// Hand-tuned look & feel presets (roadmap 0.3.4). Each defines the full set,
+/// so switching between them lands on a clean, predictable result.
+pub const PRESETS: &[Preset] = &[
+    Preset {
+        name: "Omarchy default",
+        blurb: "The stock Omarchy look — no Studio overrides",
+        values: &[],
+    },
+    Preset {
+        name: "Minimal",
+        blurb: "No gaps, no rounding, no effects — pure tiling",
+        values: &[
+            ("general.gaps_in", "0"),
+            ("general.gaps_out", "0"),
+            ("general.border_size", "1"),
+            ("decoration.rounding", "0"),
+            ("decoration.blur.enabled", "false"),
+            ("decoration.shadow.enabled", "false"),
+            ("decoration.active_opacity", "1.0"),
+            ("decoration.inactive_opacity", "1.0"),
+        ],
+    },
+    Preset {
+        name: "Cozy",
+        blurb: "Generous gaps, rounded corners, soft blur & shadow",
+        values: &[
+            ("general.gaps_in", "8"),
+            ("general.gaps_out", "16"),
+            ("general.border_size", "2"),
+            ("decoration.rounding", "12"),
+            ("decoration.blur.enabled", "true"),
+            ("decoration.blur.size", "6"),
+            ("decoration.blur.passes", "3"),
+            ("decoration.shadow.enabled", "true"),
+            ("decoration.shadow.range", "12"),
+        ],
+    },
+    Preset {
+        name: "Frosted glass",
+        blurb: "Translucent windows over a heavy background blur",
+        values: &[
+            ("general.gaps_in", "6"),
+            ("general.gaps_out", "12"),
+            ("decoration.rounding", "10"),
+            ("decoration.active_opacity", "0.92"),
+            ("decoration.inactive_opacity", "0.80"),
+            ("decoration.blur.enabled", "true"),
+            ("decoration.blur.size", "8"),
+            ("decoration.blur.passes", "4"),
+        ],
+    },
+    Preset {
+        name: "Performance",
+        blurb: "Effects off for the lightest possible compositing",
+        values: &[
+            ("general.gaps_in", "4"),
+            ("general.gaps_out", "8"),
+            ("decoration.rounding", "0"),
+            ("decoration.blur.enabled", "false"),
+            ("decoration.shadow.enabled", "false"),
+            ("decoration.active_opacity", "1.0"),
+            ("decoration.inactive_opacity", "1.0"),
+            ("decoration.dim_inactive", "false"),
+        ],
+    },
+    Preset {
+        name: "Focus",
+        blurb: "Dim and fade unfocused windows to spotlight the active one",
+        values: &[
+            ("general.gaps_in", "6"),
+            ("general.gaps_out", "12"),
+            ("decoration.rounding", "8"),
+            ("decoration.dim_inactive", "true"),
+            ("decoration.dim_strength", "0.25"),
+            ("decoration.inactive_opacity", "0.90"),
+            ("decoration.active_opacity", "1.0"),
+        ],
+    },
+];
+
+pub fn preset(name: &str) -> Option<&'static Preset> {
+    PRESETS.iter().find(|p| p.name == name)
+}
+
+/// Path of the preview-active marker. It exists while a live `hyprctl keyword`
+/// preview is applied but not yet saved; if Studio dies mid-preview, the next
+/// launch sees this and reloads Hyprland to discard the stale live values.
+pub fn preview_marker(state_dir: &std::path::Path) -> PathBuf {
+    state_dir.join("looknfeel.preview-active")
+}
+
+pub fn mark_preview_active(state_dir: &std::path::Path) {
+    let _ = std::fs::create_dir_all(state_dir);
+    let _ = std::fs::write(preview_marker(state_dir), b"1");
+}
+
+pub fn clear_preview_marker(state_dir: &std::path::Path) {
+    let _ = std::fs::remove_file(preview_marker(state_dir));
+}
+
+pub fn preview_was_active(state_dir: &std::path::Path) -> bool {
+    preview_marker(state_dir).exists()
+}
+
 /// Groups in display order (deduplicated, stable).
 pub fn groups() -> Vec<&'static str> {
     let mut seen = Vec::new();
@@ -347,6 +459,30 @@ impl LookFeel {
             });
         }
         Ok(())
+    }
+
+    /// Apply every setting live in one batch (a preset "try"). Best-effort:
+    /// the first failure is returned, but the rest are still attempted.
+    pub fn preview_all(&self, runner: &dyn crate::cmd::CommandRunner) -> Result<()> {
+        let mut first_err = None;
+        for s in SETTINGS {
+            if let Err(e) = self.preview_one(s.key, runner) {
+                first_err.get_or_insert(e);
+            }
+        }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// Replace all overrides with a preset's values (a clean, known look).
+    pub fn apply_preset(&mut self, preset: &Preset) {
+        self.overrides.clear();
+        for (key, value) in preset.values {
+            // presets are authored against the schema, so this always validates
+            let _ = self.set(key, value);
+        }
     }
 
     /// Render the managed block body as nested category blocks.
@@ -514,6 +650,49 @@ mod tests {
         let after = std::fs::read_to_string(user_path(&paths)).unwrap();
         assert!(!after.contains("omarchy-studio:looknfeel"));
         assert!(after.contains("border_size = 4"));
+    }
+
+    #[test]
+    fn presets_are_valid_and_apply_cleanly() {
+        // every preset value must reference a real setting and validate
+        for p in PRESETS {
+            for (key, value) in p.values {
+                let s = lookup(key).unwrap_or_else(|| panic!("preset {} bad key {key}", p.name));
+                assert!(
+                    s.kind.validate(value).is_ok(),
+                    "preset {} value {value} invalid for {key}",
+                    p.name
+                );
+            }
+        }
+        // applying replaces overrides wholesale
+        let paths = fake_paths("preset");
+        std::fs::write(user_path(&paths), "").unwrap();
+        let mut lf = LookFeel::load(&paths);
+        lf.set("general.gaps_in", "40").unwrap();
+        lf.apply_preset(preset("Minimal").unwrap());
+        assert_eq!(lf.value("general.gaps_in"), "0"); // preset wins, old override gone
+        assert_eq!(lf.value("decoration.blur.enabled"), "false");
+        // "Omarchy default" clears everything
+        lf.apply_preset(preset("Omarchy default").unwrap());
+        assert!(!lf.any_overrides());
+    }
+
+    #[test]
+    fn preview_marker_lifecycle() {
+        let dir = std::env::temp_dir().join(format!(
+            "omarchy-studio-marker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        assert!(!preview_was_active(&dir));
+        mark_preview_active(&dir);
+        assert!(preview_was_active(&dir));
+        clear_preview_marker(&dir);
+        assert!(!preview_was_active(&dir));
     }
 
     #[test]

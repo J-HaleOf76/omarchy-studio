@@ -116,6 +116,13 @@ impl App {
     fn new(paths: OmarchyPaths) -> Self {
         let skin = Skin::from_current(&paths);
         let themes = ThemesScreen::load(&paths);
+        // If a previous session died mid-preview, its live `hyprctl keyword`
+        // values are still applied but not on disk — reload to discard them.
+        let state = studio_core::studio_state_dir();
+        if studio_core::modules::looknfeel::preview_was_active(&state) {
+            let _ = RealRunner.run(&cmds::hypr_reload());
+            studio_core::modules::looknfeel::clear_preview_marker(&state);
+        }
         let keybinds = KeybindsScreen::load(&paths, &RealRunner);
         let looknfeel = LookFeelScreen::load(&paths);
         Self {
@@ -151,9 +158,10 @@ impl App {
             return;
         }
 
-        // Global chords (only when no in-screen text/chord field is capturing).
+        // Global chords (only when no in-screen text/chord/modal field is active).
         let capturing = (matches!(self.screen, Screen::Themes) && self.themes.is_capturing())
-            || (matches!(self.screen, Screen::Keybinds) && self.keybinds.is_capturing());
+            || (matches!(self.screen, Screen::Keybinds) && self.keybinds.is_capturing())
+            || (matches!(self.screen, Screen::LookFeel) && self.looknfeel.is_modal());
         if !capturing {
             match key.code {
                 KeyCode::Char('q') => {
@@ -212,11 +220,33 @@ impl App {
             Screen::LookFeel => match self.looknfeel.handle(key) {
                 LookFeelAction::None => {}
                 LookFeelAction::Preview(idx) => {
+                    studio_core::modules::looknfeel::mark_preview_active(
+                        &studio_core::studio_state_dir(),
+                    );
                     if let Err(e) = self.looknfeel.preview(idx, &RealRunner) {
                         self.toast = Some(Toast {
                             text: format!("preview failed: {}", brief(e)),
                             ok: false,
                         });
+                    }
+                }
+                LookFeelAction::PreviewAll => {
+                    studio_core::modules::looknfeel::mark_preview_active(
+                        &studio_core::studio_state_dir(),
+                    );
+                    match self.looknfeel.preview_all(&RealRunner) {
+                        Ok(()) => {
+                            self.toast = Some(Toast {
+                                text: "Trying preset live — s to keep, R to revert".into(),
+                                ok: true,
+                            })
+                        }
+                        Err(e) => {
+                            self.toast = Some(Toast {
+                                text: format!("preview failed: {}", brief(e)),
+                                ok: false,
+                            })
+                        }
                     }
                 }
                 LookFeelAction::Save => self.save_looknfeel(),
@@ -260,6 +290,9 @@ impl App {
                         &[],
                     );
                 }
+                studio_core::modules::looknfeel::clear_preview_marker(
+                    &studio_core::studio_state_dir(),
+                );
                 self.looknfeel.reload(&self.paths);
                 self.toast = Some(Toast {
                     text: "Saved look & feel · undo from Snapshots".into(),
@@ -279,6 +312,9 @@ impl App {
     fn reset_looknfeel(&mut self) {
         match self.looknfeel.commit(&self.paths, &RealRunner) {
             Ok(()) => {
+                studio_core::modules::looknfeel::clear_preview_marker(
+                    &studio_core::studio_state_dir(),
+                );
                 self.looknfeel.reload(&self.paths);
                 self.toast = Some(Toast {
                     text: "Reset look & feel to Omarchy defaults".into(),
