@@ -121,6 +121,9 @@ pub struct ConfigBind {
     pub flags: String,
     pub modmask: u16,
     pub key: String,
+    /// Present when the directive carries the `d` (description) flag — the
+    /// human label Omarchy shows in its cheat-sheet.
+    pub description: Option<String>,
     pub dispatcher: String,
     pub arg: String,
 }
@@ -132,17 +135,27 @@ impl ConfigBind {
         if !entry.key.starts_with("bind") {
             return None;
         }
-        // Fields: MODS, KEY, DISPATCHER, ARG(rest). The arg itself may contain
-        // commas (e.g. resizeactive), so only split the first three.
-        let mut it = entry.value.splitn(4, ',');
+        // The `d` flag (bindd/bindeld/…) inserts a DESCRIPTION field between the
+        // key and the dispatcher. Detect it from the directive's flag letters.
+        let has_desc = entry.key["bind".len()..].contains('d');
+        // Fields: MODS, KEY, [DESC,] DISPATCHER, ARG(rest). The arg may contain
+        // commas (resizeactive), so cap the split so trailing commas stay in arg.
+        let cap = if has_desc { 5 } else { 4 };
+        let mut it = entry.value.splitn(cap, ',');
         let mods = it.next()?.trim();
         let key = it.next()?.trim().to_string();
+        let description = if has_desc {
+            Some(it.next().unwrap_or("").trim().to_string())
+        } else {
+            None
+        };
         let dispatcher = it.next().unwrap_or("").trim().to_string();
         let arg = it.next().unwrap_or("").trim().to_string();
         Some(Self {
             flags: entry.key.clone(),
             modmask: mods_to_mask(mods),
             key,
+            description,
             dispatcher,
             arg,
         })
@@ -212,6 +225,118 @@ pub fn attribute(runtime: &[RuntimeBind], sources: &[SourceFile]) -> Vec<Attribu
             }
         })
         .collect()
+}
+
+// ── conflicts & overrides ────────────────────────────────────────────────────
+
+/// The identity of a chord for collision purposes: modifiers + normalized key.
+/// Two binds collide when their chord identity matches (regardless of action).
+pub fn chord_id(mask: u16, key: &str) -> (u16, String) {
+    (mask, key.to_ascii_uppercase())
+}
+
+impl ConfigBind {
+    fn chord_id(&self) -> (u16, String) {
+        chord_id(self.modmask, &self.key)
+    }
+
+    /// The mods field as Hyprland writes it in a config line (`SUPER SHIFT`).
+    pub fn mods_text(&self) -> String {
+        mask_to_mods(self.modmask).join(" ")
+    }
+
+    /// Render this bind back to a hyprlang line: `bind = MODS, KEY, DISP, ARG`.
+    /// Empty trailing fields are omitted cleanly (e.g. `killactive` has no arg).
+    pub fn render_line(&self) -> String {
+        let mut line = format!("{} = {}, {}", self.flags, self.mods_text(), self.key);
+        if let Some(desc) = &self.description {
+            line.push_str(&format!(", {desc}"));
+        }
+        if !self.dispatcher.is_empty() {
+            line.push_str(&format!(", {}", self.dispatcher));
+            if !self.arg.is_empty() {
+                line.push_str(&format!(", {}", self.arg));
+            }
+        }
+        line
+    }
+}
+
+/// Render an `unbind = MODS, KEY` line that cancels a lower-layer bind.
+pub fn render_unbind(mask: u16, key: &str) -> String {
+    let mods = mask_to_mods(mask).join(" ");
+    format!("unbind = {mods}, {key}")
+}
+
+/// A chord defined more than once in the *effective* configuration.
+#[derive(Debug, Clone)]
+pub struct Conflict {
+    pub chord: String,
+    /// The colliding binds, in source order (last is the one that wins).
+    pub binds: Vec<ConfigBind>,
+}
+
+/// Find chords bound to more than one distinct action. Binds that repeat the
+/// exact same action (harmless duplicates) are not reported; only genuine
+/// disagreements where the winning action shadows another.
+pub fn find_conflicts(binds: &[ConfigBind]) -> Vec<Conflict> {
+    use std::collections::BTreeMap;
+    let mut by_chord: BTreeMap<(u16, String), Vec<ConfigBind>> = BTreeMap::new();
+    for b in binds {
+        by_chord.entry(b.chord_id()).or_default().push(b.clone());
+    }
+    by_chord
+        .into_iter()
+        .filter_map(|((mask, _), group)| {
+            let distinct_actions = {
+                let mut acts: Vec<_> = group
+                    .iter()
+                    .map(|b| (b.dispatcher.as_str(), b.arg.as_str()))
+                    .collect();
+                acts.sort_unstable();
+                acts.dedup();
+                acts.len()
+            };
+            if distinct_actions > 1 {
+                Some(Conflict {
+                    chord: render_chord(mask, &group[0].key),
+                    binds: group,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// A user-authored change to the keymap, rendered into the managed override
+/// block in the user's bindings file.
+#[derive(Debug, Clone)]
+pub enum Override {
+    /// Bind (or rebind) a chord to an action.
+    Set(ConfigBind),
+    /// Cancel a lower-layer bind on this chord entirely.
+    Disable { modmask: u16, key: String },
+}
+
+impl Override {
+    fn render(&self) -> String {
+        match self {
+            Override::Set(cb) => cb.render_line(),
+            Override::Disable { modmask, key } => render_unbind(*modmask, key),
+        }
+    }
+}
+
+/// Build the body of the managed override block from a list of user changes,
+/// in order. This is what goes inside the `omarchy-studio:keybinds` marker
+/// block in the user's bindings.conf (spec 05 §3).
+pub fn render_override_block(overrides: &[Override]) -> String {
+    overrides
+        .iter()
+        .map(Override::render)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -300,5 +425,93 @@ mod tests {
         )
         .unwrap();
         assert!(attribute(&rt, &sources)[0].source.is_none());
+    }
+
+    fn cb(mods: &str, key: &str, disp: &str, arg: &str) -> ConfigBind {
+        ConfigBind {
+            flags: "bind".into(),
+            modmask: mods_to_mask(mods),
+            key: key.into(),
+            description: None,
+            dispatcher: disp.into(),
+            arg: arg.into(),
+        }
+    }
+
+    #[test]
+    fn render_line_round_trips_through_the_cst() {
+        for (mods, key, disp, arg) in [
+            ("SUPER", "T", "exec", "foot"),
+            ("SUPER SHIFT", "left", "resizeactive", "-20 0"),
+            ("SUPER", "W", "killactive", ""),
+            ("", "XF86AudioMute", "exec", "mute"),
+        ] {
+            let line = cb(mods, key, disp, arg).render_line();
+            let parsed = HyprDoc::parse(&format!("{line}\n"));
+            let back = ConfigBind::from_entry(&parsed.binds()[0]).unwrap();
+            assert_eq!(back.modmask, mods_to_mask(mods));
+            assert_eq!(back.key, key);
+            assert_eq!(back.dispatcher, disp);
+            assert_eq!(back.arg, arg, "arg round-trip for {line}");
+        }
+    }
+
+    #[test]
+    fn conflicts_flag_disagreements_not_harmless_dupes() {
+        let binds = vec![
+            cb("SUPER", "T", "togglefloating", ""),
+            cb("SUPER", "T", "exec", "btop"), // conflict: same chord, diff action
+            cb("SUPER", "Q", "killactive", ""),
+            cb("SUPER", "Q", "killactive", ""), // exact dup: not a conflict
+        ];
+        let conflicts = find_conflicts(&binds);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].chord, "SUPER+T");
+        assert_eq!(conflicts[0].binds.len(), 2);
+        // last-defined wins
+        assert_eq!(conflicts[0].binds.last().unwrap().arg, "btop");
+    }
+
+    #[test]
+    fn override_block_renders_binds_and_unbinds() {
+        let overrides = vec![
+            Override::Set(cb("SUPER", "B", "exec", "chromium")),
+            Override::Disable {
+                modmask: mods_to_mask("SUPER"),
+                key: "T".into(),
+            },
+        ];
+        let body = render_override_block(&overrides);
+        assert_eq!(body, "bind = SUPER, B, exec, chromium\nunbind = SUPER, T");
+        // the rendered block itself parses back cleanly
+        let doc = HyprDoc::parse(&format!("{body}\n"));
+        assert_eq!(doc.binds().len(), 2); // bind + unbind both counted as bind* keys
+    }
+
+    #[test]
+    fn parses_omarchy_described_binds_correctly() {
+        // real Omarchy formats: bindd (MODS,KEY,DESC,DISP,ARG) and bindeld
+        let doc = HyprDoc::parse(
+            "bindd = SUPER, RETURN, Terminal, exec, foot\n\
+             bindeld = ,XF86AudioRaiseVolume, Volume up, exec, omarchy-swayosd-client --output-volume raise\n",
+        );
+        let binds = doc.binds();
+        let term = ConfigBind::from_entry(&binds[0]).unwrap();
+        assert_eq!(term.description.as_deref(), Some("Terminal"));
+        assert_eq!(term.dispatcher, "exec");
+        assert_eq!(term.arg, "foot"); // NOT "Terminal, exec, foot"
+
+        let vol = ConfigBind::from_entry(&binds[1]).unwrap();
+        assert_eq!(vol.key, "XF86AudioRaiseVolume");
+        assert_eq!(vol.description.as_deref(), Some("Volume up"));
+        assert_eq!(vol.dispatcher, "exec");
+        assert_eq!(vol.arg, "omarchy-swayosd-client --output-volume raise");
+
+        // render_line puts the description back in the right place, round-trips
+        let back =
+            ConfigBind::from_entry(&HyprDoc::parse(&format!("{}\n", vol.render_line())).binds()[0])
+                .unwrap();
+        assert_eq!(back.description, vol.description);
+        assert_eq!(back.arg, vol.arg);
     }
 }
