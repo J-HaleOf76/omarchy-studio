@@ -10,6 +10,7 @@ mod chord;
 mod theme;
 mod screens {
     pub mod keybinds;
+    pub mod looknfeel;
     pub mod palette_editor;
     pub mod themes;
 }
@@ -26,6 +27,7 @@ use studio_core::omarchy::{cmds, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 use screens::keybinds::{KeybindAction, KeybindsScreen};
+use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
 use theme::Skin;
@@ -100,6 +102,7 @@ struct App {
     screen: Screen,
     themes: ThemesScreen,
     keybinds: KeybindsScreen,
+    looknfeel: LookFeelScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -114,12 +117,14 @@ impl App {
         let skin = Skin::from_current(&paths);
         let themes = ThemesScreen::load(&paths);
         let keybinds = KeybindsScreen::load(&paths, &RealRunner);
+        let looknfeel = LookFeelScreen::load(&paths);
         Self {
             paths,
             skin,
             screen: Screen::Themes,
             themes,
             keybinds,
+            looknfeel,
             editor: None,
             palette: None,
             help: false,
@@ -204,7 +209,88 @@ impl App {
                 KeybindAction::None => {}
                 KeybindAction::Commit(summary) => self.commit_keybinds(summary),
             },
+            Screen::LookFeel => match self.looknfeel.handle(key) {
+                LookFeelAction::None => {}
+                LookFeelAction::Preview(idx) => {
+                    if let Err(e) = self.looknfeel.preview(idx, &RealRunner) {
+                        self.toast = Some(Toast {
+                            text: format!("preview failed: {}", brief(e)),
+                            ok: false,
+                        });
+                    }
+                }
+                LookFeelAction::Save => self.save_looknfeel(),
+                LookFeelAction::ResetAll => self.reset_looknfeel(),
+            },
             _ => {}
+        }
+    }
+
+    /// Persist the look & feel batch with a snapshot, then reload the screen.
+    fn save_looknfeel(&mut self) {
+        if !self.looknfeel.any_overrides() {
+            self.toast = Some(Toast {
+                text: "Nothing to save — no changes from the Omarchy defaults".into(),
+                ok: true,
+            });
+            return;
+        }
+        let file = self.paths.hypr_config().join("looknfeel.conf");
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before: look & feel change",
+                std::slice::from_ref(&file),
+                "looknfeel",
+                &[],
+            );
+        }
+        match self.looknfeel.commit(&self.paths, &RealRunner) {
+            Ok(()) => {
+                if let Ok(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        "look & feel change",
+                        std::slice::from_ref(&file),
+                        "looknfeel",
+                        &[],
+                    );
+                }
+                self.looknfeel.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: "Saved look & feel · undo from Snapshots".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("save failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Remove all look & feel overrides and reload Hyprland to the base config.
+    fn reset_looknfeel(&mut self) {
+        match self.looknfeel.commit(&self.paths, &RealRunner) {
+            Ok(()) => {
+                self.looknfeel.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: "Reset look & feel to Omarchy defaults".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("reset failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -523,6 +609,7 @@ impl App {
         match self.screen {
             Screen::Themes => self.themes.render(f, pad, &self.skin),
             Screen::Keybinds => self.keybinds.render(f, pad, &self.skin),
+            Screen::LookFeel => self.looknfeel.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
         }
     }

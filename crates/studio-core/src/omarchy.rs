@@ -201,6 +201,13 @@ pub mod cmds {
         Cmd::new("hyprctl").arg("binds").arg("-j")
     }
 
+    /// Apply a single setting live, without writing any file — the look & feel
+    /// preview primitive. `name` is Hyprland's colon form, e.g.
+    /// `decoration:blur:size`. Lost on the next reload (that's the point).
+    pub fn hypr_keyword(name: &str, value: &str) -> Cmd {
+        Cmd::new("hyprctl").arg("keyword").arg(name).arg(value)
+    }
+
     pub fn theme_refresh() -> Cmd {
         Cmd::new("omarchy-theme-refresh")
     }

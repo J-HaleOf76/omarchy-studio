@@ -31,8 +31,8 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 ## v0.3 — Look & Feel + Animations (~2 wks) — *exit: try→apply→undo presets; zero broken reloads*
 
-- [ ] 0.3.1 looknfeel schema + form rendering from schema [05 §2, 01 §2]
-- [ ] 0.3.2 Live keyword batching + preview-active crash marker [05 §2]
+- [x] 0.3.1 looknfeel schema + schema-driven form screen: grouped plain-language settings reading effective (default+user) values, h/l adjust, live render [05 §2, 01 §2]
+- [~] 0.3.2 live hyprctl-keyword preview on every adjust (batched into managed block on save); preview-active crash marker still TODO [05 §2]
 - [ ] 0.3.3 Preset loader + try/apply + managed section render [05 §3]
 - [ ] 0.3.4 Remaining 6 presets tuned by hand on the reference machine
 - [ ] 0.3.5 Toggle-flag switches (omarchy-toggle-* wrap) [05 §2]

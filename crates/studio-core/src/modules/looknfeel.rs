@@ -326,6 +326,29 @@ impl LookFeel {
         self.overrides.remove(key);
     }
 
+    /// Drop every override (Reset All).
+    pub fn clear_all(&mut self) {
+        self.overrides.clear();
+    }
+
+    pub fn any_overrides(&self) -> bool {
+        !self.overrides.is_empty()
+    }
+
+    /// Apply one setting live via `hyprctl keyword`, without writing anything —
+    /// the preview primitive. Ephemeral: undone by the next reload.
+    pub fn preview_one(&self, key: &str, runner: &dyn crate::cmd::CommandRunner) -> Result<()> {
+        let value = self.value(key);
+        let out = runner.run(&crate::omarchy::cmds::hypr_keyword(&colon_key(key), &value))?;
+        if !out.ok() {
+            return Err(StudioError::External {
+                cmd: format!("hyprctl keyword {}", colon_key(key)),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(())
+    }
+
     /// Render the managed block body as nested category blocks.
     pub fn render_block_body(&self) -> String {
         let entries: Vec<(Vec<String>, String)> = self
@@ -367,6 +390,12 @@ impl LookFeel {
         }
         Ok(path)
     }
+}
+
+/// Hyprland's colon form of a dotted key: `decoration.blur.size` →
+/// `decoration:blur:size` (what `hyprctl keyword` expects).
+pub fn colon_key(dotted: &str) -> String {
+    dotted.replace('.', ":")
 }
 
 /// Emit `path…value` entries as nested `category { … }` blocks. Entries whose
@@ -414,6 +443,7 @@ mod tests {
         }
         assert!(lookup("decoration.blur.size").is_some());
         assert!(groups().contains(&"Blur"));
+        assert_eq!(colon_key("decoration.blur.size"), "decoration:blur:size");
     }
 
     #[test]
