@@ -47,7 +47,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [ ] 0.4.4 style.css managed block (geometry) + @import-position assert [03 §4]
 - [ ] 0.4.5 Custom module wizard (script scaffold) [05 §4]
 - [ ] 0.4.6 Crash watchdog apply flow [05 §4]
-- [ ] 0.4.7 CLI `waybar modules/add/remove/move/set` [08]
+- [x] 0.4.7 CLI waybar modules/add/remove/move/set (snapshot-backed, restarts Waybar) [08]
 
 ## v0.5 — Notifications, OSD, Lock/Idle (~2 wks) — *exit: mako behavior survives theme switch + omarchy-update*
 

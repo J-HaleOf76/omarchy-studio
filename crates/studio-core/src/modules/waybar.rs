@@ -193,6 +193,20 @@ impl WaybarConfig {
             .map_err(edit_err)
     }
 
+    /// Move a module to `lane`, removing it from whichever lane holds it.
+    pub fn move_to(&mut self, id: &str, lane: &str) -> Result<()> {
+        for l in LANES {
+            self.remove(l, id)?;
+        }
+        self.add(lane, id)
+    }
+
+    /// Set a scalar config value in place (e.g. `height` → `30`). `raw` is the
+    /// literal JSON text (numbers bare, strings quoted).
+    pub fn set_scalar(&mut self, path: &str, raw: &str) -> Result<()> {
+        self.doc.set_scalar(path, raw).map_err(edit_err)
+    }
+
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }

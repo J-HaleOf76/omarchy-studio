@@ -31,6 +31,7 @@ fn main() {
         ["preset", rest @ ..] => preset(rest),
         ["toggle", rest @ ..] => toggle(rest),
         ["animations", rest @ ..] => animations(rest),
+        ["waybar", rest @ ..] => waybar(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -460,6 +461,113 @@ fn animations(args: &[&str]) -> i32 {
         _ => {
             eprintln!("usage: animations list | current | apply <name>");
             2
+        }
+    }
+}
+
+fn waybar(args: &[&str]) -> i32 {
+    use studio_core::modules::waybar::{label_for, WaybarConfig, LANES};
+    let Some(paths) = omarchy() else { return 4 };
+    // left/center/right → the full lane key
+    let lane_key = |name: &str| match name {
+        "left" => Some("modules-left"),
+        "center" => Some("modules-center"),
+        "right" => Some("modules-right"),
+        _ => None,
+    };
+
+    // Read-only listing needs no snapshot.
+    if let ["modules"] | [] = args {
+        match WaybarConfig::load(&paths) {
+            Ok(cfg) => {
+                for (lane, short) in LANES.iter().zip(["left", "center", "right"]) {
+                    println!("{short}:");
+                    for id in cfg.lane(lane) {
+                        println!("    {:<26} {}", label_for(&id), id);
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("can't read waybar config: {e:?}");
+                1
+            }
+        }
+    } else {
+        // mutating verbs share load → edit → snapshot → apply
+        let mut cfg = match WaybarConfig::load(&paths) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("can't read waybar config: {e:?}");
+                return 1;
+            }
+        };
+        let (edit, summary): (studio_core::error::Result<()>, String) = match args {
+            ["add", lane, id] => match lane_key(lane) {
+                Some(l) => (cfg.add(l, id), format!("waybar add {id} → {lane}")),
+                None => {
+                    eprintln!("lane must be left|center|right");
+                    return 2;
+                }
+            },
+            ["remove", lane, id] => match lane_key(lane) {
+                Some(l) => (cfg.remove(l, id), format!("waybar remove {id}")),
+                None => {
+                    eprintln!("lane must be left|center|right");
+                    return 2;
+                }
+            },
+            ["move", id, lane] => match lane_key(lane) {
+                Some(l) => (cfg.move_to(id, l), format!("waybar move {id} → {lane}")),
+                None => {
+                    eprintln!("lane must be left|center|right");
+                    return 2;
+                }
+            },
+            ["set", path, value] => (
+                cfg.set_scalar(path, value),
+                format!("waybar set {path}={value}"),
+            ),
+            _ => {
+                eprintln!(
+                    "usage: waybar modules | add <lane> <id> | remove <lane> <id> | move <id> <lane> | set <path> <value>"
+                );
+                return 2;
+            }
+        };
+        if let Err(e) = edit {
+            eprintln!("{e:?}");
+            return 2;
+        }
+        let file = cfg.path().to_path_buf();
+        let store = history().ok();
+        if let Some(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                &format!("before {summary}"),
+                std::slice::from_ref(&file),
+                "waybar",
+                &[],
+            );
+        }
+        match cfg.apply(&RealRunner) {
+            Ok(()) => {
+                if let Some(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        &summary,
+                        std::slice::from_ref(&file),
+                        "waybar",
+                        &[],
+                    );
+                }
+                println!("{summary} · undo with `omarchy-studio snapshot undo`");
+                0
+            }
+            Err(e) => {
+                eprintln!("apply failed: {e:?}");
+                1
+            }
         }
     }
 }
