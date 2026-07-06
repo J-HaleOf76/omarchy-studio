@@ -151,6 +151,61 @@ impl JsoncDoc {
         Ok(())
     }
 
+    /// Remove the first array element whose module name matches `id` (a quoted
+    /// string like `"clock"`). No-op if absent. Preserves other elements' text.
+    pub fn remove_item(&mut self, path: &str, id: &str) -> Result<(), String> {
+        let span = match self.resolve(path) {
+            Some(Node::Array { span, .. }) => *span,
+            Some(_) => return Err(format!("{path} is not an array")),
+            None => return Err(format!("{path} not found")),
+        };
+        let inner_span = (span.0 + 1, span.1 - 1);
+        let inner = self.src[inner_span.0..inner_span.1].to_string();
+        let mut chunks = split_top_level(&inner);
+        let want = id.trim();
+        let Some(pos) = chunks.iter().position(|c| chunk_key(c) == want) else {
+            return Ok(());
+        };
+        chunks.remove(pos);
+        let out = chunks.join(",");
+        self.splice(inner_span, &out);
+        Ok(())
+    }
+
+    /// Append a module `id` (quoted, e.g. `"cpu"`) to the end of a lane array,
+    /// matching the existing indentation. No-op if it's already present.
+    pub fn add_item(&mut self, path: &str, id: &str) -> Result<(), String> {
+        let span = match self.resolve(path) {
+            Some(Node::Array { span, .. }) => *span,
+            Some(_) => return Err(format!("{path} is not an array")),
+            None => return Err(format!("{path} not found")),
+        };
+        let inner_span = (span.0 + 1, span.1 - 1);
+        let inner = self.src[inner_span.0..inner_span.1].to_string();
+        let mut chunks = split_top_level(&inner);
+        let want = id.trim();
+        if chunks.iter().any(|c| chunk_key(c) == want) {
+            return Ok(());
+        }
+        // Reuse the leading whitespace of the last chunk (its indent) for the
+        // new element; fall back to a single space for an inline array.
+        let indent = chunks
+            .last()
+            .map(|c| {
+                let ws: String = c.chars().take_while(|ch| ch.is_whitespace()).collect();
+                if ws.is_empty() {
+                    " ".to_string()
+                } else {
+                    ws
+                }
+            })
+            .unwrap_or_else(|| " ".to_string());
+        chunks.push(format!("{indent}{want}"));
+        let out = chunks.join(",");
+        self.splice(inner_span, &out);
+        Ok(())
+    }
+
     fn splice(&mut self, span: (usize, usize), replacement: &str) {
         let mut s = String::with_capacity(self.src.len());
         s.push_str(&self.src[..span.0]);
@@ -437,6 +492,28 @@ mod tests {
             re.array_items("modules-right").unwrap(),
             vec!["\"clock\"", "\"network\"", "\"battery\""]
         );
+    }
+
+    #[test]
+    fn add_and_remove_items_preserve_the_rest() {
+        let mut doc = JsoncDoc::parse(SAMPLE).unwrap();
+        doc.add_item("modules-left", "\"cpu\"").unwrap();
+        assert_eq!(
+            doc.array_items("modules-left").unwrap(),
+            vec!["\"custom/omarchy\"", "\"hyprland/workspaces\"", "\"cpu\""]
+        );
+        // idempotent add
+        doc.add_item("modules-left", "\"cpu\"").unwrap();
+        assert_eq!(doc.array_items("modules-left").unwrap().len(), 3);
+        // remove from another lane; structural (own-line) comments stay intact
+        doc.remove_item("modules-right", "\"battery\"").unwrap();
+        let items = doc.array_items("modules-right").unwrap();
+        assert_eq!(items, vec!["\"network\"", "\"clock\""]);
+        assert!(doc.to_string().contains("// top comment"));
+        assert!(doc.to_string().contains("\"height\": 26"));
+        // removing an absent module is a no-op
+        doc.remove_item("modules-right", "\"nope\"").unwrap();
+        assert_eq!(doc.array_items("modules-right").unwrap().len(), 2);
     }
 
     #[test]

@@ -19,3 +19,4 @@ pub mod keybinds;
 pub mod looknfeel;
 pub mod themes;
 pub mod toggles;
+pub mod waybar;

@@ -42,7 +42,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 ## v0.4 — Waybar (~3 wks) — *exit: reorder bar + add custom module without touching JSON*
 
 - [x] 0.4.1 JSONC editor (span-splice, comment-preserving): GO — parse/get/array_items/set_scalar/reorder, byte-identical round-trip of real waybar config.jsonc; no external jsonc-parser dep [03 §3]
-- [ ] 0.4.2 Module catalog schema (30 modules, deps, snippets) [05 §4]
+- [x] 0.4.2 Waybar module catalog (20 modules: label/group/summary/deps/default-config snippet, custom/group fallbacks) + WaybarConfig model (lanes/reorder/add/remove/save/apply) [05 §4]
 - [ ] 0.4.3 Lanes widget + module forms + generic key/value editor [07 §4]
 - [ ] 0.4.4 style.css managed block (geometry) + @import-position assert [03 §4]
 - [ ] 0.4.5 Custom module wizard (script scaffold) [05 §4]
