@@ -251,6 +251,17 @@ pub mod cmds {
             .env("OMARCHY_THEME_SKIP_BACKGROUND", "1")
     }
 
+    /// Set the wallpaper — Omarchy's own script handles image/gif/video
+    /// dispatch (swaybg/swww/mpvpaper) and the current/background link.
+    pub fn theme_bg_set(path: &std::path::Path) -> Cmd {
+        Cmd::new("omarchy-theme-bg-set").arg(path.to_string_lossy())
+    }
+
+    /// Cycle to the next background for the current theme.
+    pub fn theme_bg_next() -> Cmd {
+        Cmd::new("omarchy-theme-bg-next")
+    }
+
     pub fn makoctl_reload() -> Cmd {
         Cmd::new("makoctl").arg("reload")
     }

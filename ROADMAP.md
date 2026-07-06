@@ -60,7 +60,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 ## v0.6 — Wallpaper & Palette Lab (~2–3 wks) — *exit: wallhaven → crafted theme, entirely inside Studio*
 
-- [ ] 0.6.1 Wallpaper browser (4-source merge, video gating) [04 §5]
+- [x] 0.6.1 Wallpaper browser (4-source merge, video gating) [04 §5]
 - [ ] 0.6.2 Extraction port: median-cut + Normal/Muted/Material + golden tests vs Aether [04 §4]
 - [ ] 0.6.3 wallhaven client (search/filters/rate budget/thumb cache) [04 §6]
 - [ ] 0.6.4 ImageCell + graphics probe + imv fallback [07 §4, 06]

@@ -18,6 +18,7 @@ mod screens {
     pub mod notifications;
     pub mod palette_editor;
     pub mod themes;
+    pub mod wallpapers;
     pub mod waybar;
 }
 
@@ -43,6 +44,7 @@ use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
+use screens::wallpapers::{WallpaperAction, WallpapersScreen};
 use screens::waybar::{WaybarAction, WaybarScreen};
 use theme::Skin;
 
@@ -97,6 +99,7 @@ impl Screen {
         matches!(
             self,
             Screen::Themes
+                | Screen::Wallpapers
                 | Screen::Keybinds
                 | Screen::LookFeel
                 | Screen::Animations
@@ -137,6 +140,7 @@ struct App {
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
     doctor: DoctorScreen,
+    wallpapers: WallpapersScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -165,6 +169,10 @@ impl App {
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
         let doctor = DoctorScreen::load(&paths, &RealRunner);
+        let wallpapers = WallpapersScreen::load(
+            &paths,
+            studio_core::omarchy::Capabilities::probe(&paths, &RealRunner).video_wallpapers,
+        );
         Self {
             paths,
             skin,
@@ -177,6 +185,7 @@ impl App {
             notifications,
             lockidle,
             doctor,
+            wallpapers,
             editor: None,
             palette: None,
             help: false,
@@ -209,7 +218,8 @@ impl App {
             || (matches!(self.screen, Screen::LookFeel) && self.looknfeel.is_modal())
             || (matches!(self.screen, Screen::Waybar) && self.waybar.is_modal())
             || (matches!(self.screen, Screen::Notifications) && self.notifications.is_modal())
-            || (matches!(self.screen, Screen::LockIdle) && self.lockidle.is_modal());
+            || (matches!(self.screen, Screen::LockIdle) && self.lockidle.is_modal())
+            || (matches!(self.screen, Screen::Wallpapers) && self.wallpapers.is_modal());
         if !capturing {
             match key.code {
                 KeyCode::Char('q') => {
@@ -356,6 +366,13 @@ impl App {
             Screen::LockIdle => match self.lockidle.handle(key) {
                 LockIdleAction::None => {}
                 LockIdleAction::Save => self.apply_lockidle(),
+            },
+            Screen::Wallpapers => match self.wallpapers.handle(key) {
+                WallpaperAction::None => {}
+                WallpaperAction::Set(path) => self.wp_set(&path),
+                WallpaperAction::Next => self.wp_next(),
+                WallpaperAction::Add(path) => self.wp_add(&path),
+                WallpaperAction::Remove(entry) => self.wp_remove(&entry),
             },
             Screen::Doctor => match self.doctor.handle(key) {
                 DoctorAction::None => {}
@@ -570,6 +587,91 @@ impl App {
                 text: format!("lock & idle failed — {note}"),
                 ok: false,
             });
+        }
+    }
+
+    fn wp_set(&mut self, path: &std::path::Path) {
+        use studio_core::modules::wallpapers::Wallpapers;
+        match Wallpapers::set(&RealRunner, path) {
+            Ok(()) => {
+                self.wallpapers.reload(&self.paths);
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.toast = Some(Toast {
+                    text: format!("Wallpaper: {name}"),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't set wallpaper: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    fn wp_next(&mut self) {
+        use studio_core::modules::wallpapers::Wallpapers;
+        match Wallpapers::next(&RealRunner) {
+            Ok(()) => {
+                self.wallpapers.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: "Cycled to the next background".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't cycle: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    fn wp_add(&mut self, path: &std::path::Path) {
+        use studio_core::modules::wallpapers::Wallpapers;
+        let w = Wallpapers::load(&self.paths);
+        match w.add(&self.paths, path) {
+            Ok(dest) => {
+                self.wallpapers.reload(&self.paths);
+                let name = dest
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.toast = Some(Toast {
+                    text: format!("Added {name} — Enter applies it"),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't add: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    fn wp_remove(&mut self, entry: &studio_core::modules::wallpapers::Entry) {
+        use studio_core::modules::wallpapers::Wallpapers;
+        match Wallpapers::remove(entry) {
+            Ok(()) => {
+                self.wallpapers.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: format!("Removed {}", entry.name()),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't remove: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -1108,6 +1210,7 @@ impl App {
             Screen::Waybar => self.waybar.render(f, area, &self.skin),
             Screen::Notifications => self.notifications.render(f, area, &self.skin),
             Screen::LockIdle => self.lockidle.render(f, area, &self.skin),
+            Screen::Wallpapers => self.wallpapers.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
         }

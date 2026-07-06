@@ -38,6 +38,7 @@ fn main() {
         ["osd", rest @ ..] => osd(rest),
         ["idle", rest @ ..] => idle(rest),
         ["lock", rest @ ..] => lock(rest),
+        ["wallpaper", rest @ ..] => wallpaper(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1288,6 +1289,112 @@ fn toggle(args: &[&str]) -> i32 {
         }
         _ => {
             eprintln!("usage: toggle list | toggle <id>");
+            2
+        }
+    }
+}
+
+// ── wallpapers (spec 04 §5) ─────────────────────────────────────────────────
+
+fn wallpaper(args: &[&str]) -> i32 {
+    use studio_core::modules::wallpapers::Wallpapers;
+    let Some(paths) = omarchy() else { return 4 };
+    let w = Wallpapers::load(&paths);
+    match args {
+        ["list"] => {
+            if w.entries.is_empty() {
+                println!("no wallpapers found for theme `{}`", w.theme);
+                return 0;
+            }
+            for (i, e) in w.entries.iter().enumerate() {
+                let mark = if w.is_current(e) { "*" } else { " " };
+                println!(
+                    "{mark} {:>2}  {:<36} {:<6} {}",
+                    i + 1,
+                    e.name(),
+                    e.kind.label(),
+                    e.source.label()
+                );
+            }
+            0
+        }
+        ["current"] => match &w.current {
+            Some(p) => {
+                println!("{}", p.display());
+                0
+            }
+            None => {
+                eprintln!("no current background link");
+                1
+            }
+        },
+        ["set", which] => {
+            // by 1-based index, listed name, or a path
+            let path = which
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| w.entries.get(n.wrapping_sub(1)))
+                .map(|e| e.path.clone())
+                .or_else(|| {
+                    w.entries
+                        .iter()
+                        .find(|e| e.name() == *which)
+                        .map(|e| e.path.clone())
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from(which));
+            match Wallpapers::set(&RealRunner, &path) {
+                Ok(()) => {
+                    println!("wallpaper set: {}", path.display());
+                    0
+                }
+                Err(e) => {
+                    eprintln!("couldn't set wallpaper: {e:?}");
+                    1
+                }
+            }
+        }
+        ["next"] => match Wallpapers::next(&RealRunner) {
+            Ok(()) => {
+                println!("cycled to the next background");
+                0
+            }
+            Err(e) => {
+                eprintln!("couldn't cycle: {e:?}");
+                1
+            }
+        },
+        ["add", file] => match w.add(&paths, std::path::Path::new(file)) {
+            Ok(dest) => {
+                println!(
+                    "added {} — apply with: omarchy-studio wallpaper set {}",
+                    dest.display(),
+                    dest.file_name().unwrap_or_default().to_string_lossy()
+                );
+                0
+            }
+            Err(e) => {
+                eprintln!("couldn't add: {e:?}");
+                1
+            }
+        },
+        ["remove", name] => {
+            let Some(entry) = w.entries.iter().find(|e| e.name() == *name) else {
+                eprintln!("no wallpaper named `{name}` — see `omarchy-studio wallpaper list`");
+                return 1;
+            };
+            match Wallpapers::remove(entry) {
+                Ok(()) => {
+                    println!("removed {}", entry.path.display());
+                    0
+                }
+                Err(e) => {
+                    eprintln!("couldn't remove: {e:?}");
+                    1
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: wallpaper list | current | set <n|name|path> | next | add <file> | remove <name>");
             2
         }
     }

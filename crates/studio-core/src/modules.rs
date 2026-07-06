@@ -22,4 +22,5 @@ pub mod mako;
 pub mod swayosd;
 pub mod themes;
 pub mod toggles;
+pub mod wallpapers;
 pub mod waybar;
