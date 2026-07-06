@@ -1,41 +1,131 @@
 # Omarchy Studio
 
-**The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — wallpapers, palettes, themes, keybinds, animations, Waybar, notifications, lock/idle — all editable from a keyboard-driven TUI with live preview and one-key undo. No config-file jargon required (but the raw file is always one keystroke away).
+**The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
-> Status: **pre-alpha — specification & scaffold.** Nothing is usable yet.
-> Working name `omarchy-studio`; final name TBD (PRD §16 Q1).
+> **Status: alpha.** The modules below are built, tested (128 tests green), and drive the real Omarchy config on disk. Wallpapers, palette extraction, the doctor, and update-survival hooks are still on the roadmap. Tested against Omarchy 3.8.
 
 ## Why
 
-Omarchy's menu covers *picking* a theme; everything past that is hand-editing five config dialects across four directory trees, with no discoverability and no undo. The community solved colors six times over (Aether, Omarchist, tema, generators) — nobody built the control center for the *behavioral* half: keybinds, animations, bar layout, notification behavior. Studio does both halves, natively, and integrates with the tools that already exist.
+Omarchy's menu covers *picking* a theme; everything past that is hand-editing five config dialects across four directory trees, with no discoverability and no undo. The community solved colors six times over — nobody built the control center for the *behavioral* half: keybinds, animations, bar layout, notification behavior. Studio does both, natively, and integrates with the tools that already exist.
+
+## What works today
+
+| Module | What you can do | Since |
+|---|---|---|
+| **Themes** | List, show current, apply, fork an existing theme into your own | v0.1 |
+| **Keybinds** | Browse and rebind Hyprland keybindings, live capture | v0.2 |
+| **Look & Feel** | Gaps, borders, rounding, opacity and other Hyprland variables | v0.3 |
+| **Animations** | Apply curated animation presets | v0.3 |
+| **Waybar** | Reorder/add/remove modules across lanes, tweak settings, font-size & radius, build custom modules — with a crash-watchdog that auto-reverts a config that kills the bar | v0.4 |
+| **Notifications (mako)** | Behavior schema (timeouts, layout, urgency rules), do-not-disturb, live sample notifications | v0.5 |
+| **OSD (swayosd)** | Volume/brightness popup geometry, percentage, margins, self-test | v0.5 |
+| **Lock & Idle** | Retime the hypridle timeline (screensaver → lock → screen-off → suspend), hyprlock avatar/blur/dim | v0.5 |
+
+Every change is snapshotted to a git-backed history — undo with a single command or key.
+
+## Install
+
+Requires a Rust toolchain (1.96+) and an Omarchy system (Arch + Hyprland).
+
+```bash
+git clone https://github.com/arino08/omarchy-studio
+cd omarchy-studio
+cargo build --release
+# binary at ./target/release/omarchy-studio — copy it onto your PATH:
+install -Dm755 target/release/omarchy-studio ~/.local/bin/omarchy-studio
+```
+
+Optional — add Studio to the Omarchy menu as a floating terminal app:
+
+```bash
+omarchy-studio install-integration    # undo with: omarchy-studio uninstall
+```
+
+## Quick start — the TUI
+
+```bash
+omarchy-studio          # launch the full-screen cockpit
+```
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift-Tab` | next / previous module |
+| `1`–`9`, `0` | jump straight to a module |
+| `j` / `k`, arrows | move within a screen |
+| `h` / `l` | adjust the selected value |
+| `Enter` | open a picker (avatar, theme, …) |
+| `s` | save pending edits (snapshotted first) |
+| `/` | search · `?` help · `q` quit |
+
+Studio themes itself from your active Omarchy theme, so it always matches your desktop. Screens for not-yet-built modules (Wallpaper, Doctor) show an honest "arriving in …" placeholder rather than a broken UI.
+
+## CLI reference
+
+Everything the TUI does is scriptable. Each mutating command prints its undo hint.
+
+```bash
+# Themes
+omarchy-studio theme list | current | apply <name> | fork <src> <new>
+
+# Snapshots / undo
+omarchy-studio snapshot list | undo | restore <id>
+
+# Look & Feel
+omarchy-studio looknfeel list | get <key> | set <key> <value>
+
+# Animations
+omarchy-studio animations list | current | apply <name>
+
+# Presets (bundled look & feel + animation combos)
+omarchy-studio preset list | try <name> | apply <name>
+
+# Toggles
+omarchy-studio toggle <name>
+
+# Waybar
+omarchy-studio waybar modules
+omarchy-studio waybar add <lane> <id> | remove <lane> <id> | move <id> <lane>
+omarchy-studio waybar set <path> <value>
+omarchy-studio waybar new <name> --exec <cmd> [--interval N] [--format F] [--on-click C] [--lane left|center|right]
+omarchy-studio waybar style show | font-size <n> | radius <n> | reset
+
+# Notifications (mako)
+omarchy-studio notif list | get <key> | set <key> <value>
+omarchy-studio notif rule add <crit> <action> | rule remove <n>
+omarchy-studio notif dnd on|off|status | test low|normal|critical
+
+# OSD (swayosd)
+omarchy-studio osd show
+omarchy-studio osd set show-percentage <on|off> | max-volume <n> | top-margin <0..1> | radius <n> | font <pt>
+omarchy-studio osd test
+
+# Lock & Idle
+omarchy-studio idle timeline
+omarchy-studio idle set <screensaver|lock|screen-off|suspend> <seconds>
+omarchy-studio lock show | avatar <path> | avatar list | size <px> | blur <n> | dim <0..1> | preview
+
+# Health check
+omarchy-studio doctor [--deps]
+```
 
 ## Design pillars
 
 1. **Never fight Omarchy** — write only to user-owned files and sanctioned extension surfaces; apply through `omarchy-theme-set` / `omarchy-theme-refresh` / `omarchy-restart-*`.
-2. **The file is still the truth** — comment-preserving edits; hand-edits and Studio edits coexist.
-3. **Show, don't describe** — live preview via `hyprctl keyword`, with confirm-or-revert.
-4. **Undo is sacred** — git-backed snapshots of every change Studio ever makes.
-5. **Explain everything** — every field shows the config line it generates.
-6. **Keyboard-first, menu-native** — launches from the Omarchy menu as a floating terminal.
-7. **Never strand the user** — missing dependency ⇒ visible-but-disabled feature with the exact install command and a guided install, never a silent failure.
+2. **The file is still the truth** — comment-preserving, span-splice edits; your hand-edits and Studio's edits coexist byte-for-byte.
+3. **Show, don't describe** — live preview and confirm-or-revert; a Waybar config that crashes the bar rolls itself back.
+4. **Undo is sacred** — git-backed snapshots of every change Studio makes.
+5. **Never strand the user** — a missing dependency is a visible-but-disabled feature with the exact install command, never a silent failure.
 
 ## Repository map
 
 | Path | What |
 |---|---|
-| `docs/PRD.md` | Product requirements (v0.3) — the *what* and *why* |
+| `docs/PRD.md` | Product requirements — the *what* and *why* |
 | `docs/specs/` | Build specs — the *how* (start at `00-overview.md`) |
 | `ROADMAP.md` | Milestones broken into issue-sized tasks |
-| `crates/studio-core/` | Engine library: config model, parsers, apply pipeline, snapshots, Omarchy adapter |
+| `crates/studio-core/` | Engine library: config model, comment-preserving parsers, apply pipeline, snapshots, Omarchy adapter |
 | `crates/omarchy-studio/` | The binary: TUI + CLI frontends |
-| `data/integrations.toml` | Declarative registry of external tools & dependencies (FR11.6/M11) |
-| `data/animation-presets/` | Animation preset bundles shipped with Studio |
-
-## Building
-
-```bash
-cargo check          # skeleton compiles with zero external deps (for now)
-```
+| `data/` | Bundled presets and the integrations registry |
 
 ## License
 
