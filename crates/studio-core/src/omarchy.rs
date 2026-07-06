@@ -255,6 +255,30 @@ pub mod cmds {
         Cmd::new("makoctl").arg("reload")
     }
 
+    /// List the notification daemon's currently active modes (one per line).
+    pub fn makoctl_mode_list() -> Cmd {
+        Cmd::new("makoctl").arg("mode")
+    }
+
+    /// Add a mode (e.g. `do-not-disturb`).
+    pub fn makoctl_mode_add(mode: &str) -> Cmd {
+        Cmd::new("makoctl").arg("mode").arg("-a").arg(mode)
+    }
+
+    /// Remove a mode.
+    pub fn makoctl_mode_remove(mode: &str) -> Cmd {
+        Cmd::new("makoctl").arg("mode").arg("-r").arg(mode)
+    }
+
+    /// Fire a sample notification (used by the live-test rows).
+    pub fn notify_send(urgency: &str, summary: &str, body: &str) -> Cmd {
+        Cmd::new("notify-send")
+            .arg("-u")
+            .arg(urgency)
+            .arg(summary)
+            .arg(body)
+    }
+
     pub fn process_alive(name: &str) -> Cmd {
         Cmd::new("pgrep").arg("-x").arg(name)
     }

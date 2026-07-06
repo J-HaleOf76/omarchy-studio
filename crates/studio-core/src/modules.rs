@@ -17,6 +17,7 @@ pub mod color;
 pub mod dispatchers;
 pub mod keybinds;
 pub mod looknfeel;
+pub mod mako;
 pub mod themes;
 pub mod toggles;
 pub mod waybar;
