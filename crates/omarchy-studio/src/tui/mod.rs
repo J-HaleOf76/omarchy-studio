@@ -11,6 +11,7 @@ mod theme;
 mod screens {
     pub mod animations;
     pub mod keybinds;
+    pub mod lockidle;
     pub mod looknfeel;
     pub mod notifications;
     pub mod palette_editor;
@@ -31,6 +32,7 @@ use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 use screens::animations::{AnimAction, AnimationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
+use screens::lockidle::{LockIdleAction, LockIdleScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
@@ -112,6 +114,7 @@ struct App {
     animations: AnimationsScreen,
     waybar: WaybarScreen,
     notifications: NotificationsScreen,
+    lockidle: LockIdleScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -138,6 +141,7 @@ impl App {
         let waybar = WaybarScreen::load(&paths);
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
+        let lockidle = LockIdleScreen::load(&paths);
         Self {
             paths,
             skin,
@@ -148,6 +152,7 @@ impl App {
             animations,
             waybar,
             notifications,
+            lockidle,
             editor: None,
             palette: None,
             help: false,
@@ -179,7 +184,8 @@ impl App {
             || (matches!(self.screen, Screen::Keybinds) && self.keybinds.is_capturing())
             || (matches!(self.screen, Screen::LookFeel) && self.looknfeel.is_modal())
             || (matches!(self.screen, Screen::Waybar) && self.waybar.is_modal())
-            || (matches!(self.screen, Screen::Notifications) && self.notifications.is_modal());
+            || (matches!(self.screen, Screen::Notifications) && self.notifications.is_modal())
+            || (matches!(self.screen, Screen::LockIdle) && self.lockidle.is_modal());
         if !capturing {
             match key.code {
                 KeyCode::Char('q') => {
@@ -323,6 +329,10 @@ impl App {
                 NotifAction::Test(urgency) => self.notif_test(&urgency),
                 NotifAction::OsdTest => self.osd_test(),
             },
+            Screen::LockIdle => match self.lockidle.handle(key) {
+                LockIdleAction::None => {}
+                LockIdleAction::Save => self.apply_lockidle(),
+            },
             _ => {}
         }
     }
@@ -460,6 +470,71 @@ impl App {
         use studio_core::modules::mako;
         self.notifications
             .set_dnd(Some(mako::dnd_active(&RealRunner)));
+    }
+
+    /// Snapshot + apply hypridle (restart) and hyprlock (backup on first save).
+    fn apply_lockidle(&mut self) {
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(idle) = self.lockidle.idle_ref() {
+            files.push(idle.path().to_path_buf());
+        }
+        if let Some(lock) = self.lockidle.lock_ref() {
+            files.push(lock.path().to_path_buf());
+        }
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before: lock & idle",
+                &files,
+                "lockidle",
+                &[],
+            );
+        }
+
+        let mut ok = true;
+        let mut note = String::new();
+        if let Some(idle) = self.lockidle.idle_ref() {
+            if let Err(e) = idle.apply(&RealRunner) {
+                ok = false;
+                note = format!("hypridle: {}", brief(e));
+            }
+        }
+        if ok {
+            if let Some(lock) = self.lockidle.lock_ref() {
+                match lock.save() {
+                    Ok(Some(dir)) => {
+                        note = format!("backed up lock screen to {}", dir.display());
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        ok = false;
+                        note = format!("hyprlock: {}", brief(e));
+                    }
+                }
+            }
+        }
+
+        if ok {
+            if let Ok(s) = &store {
+                let _ = s.record(SnapshotKind::Post, "lock & idle", &files, "lockidle", &[]);
+            }
+            self.lockidle.reload(&self.paths);
+            let text = if note.is_empty() {
+                "Saved lock & idle · undo from Snapshots".into()
+            } else {
+                format!("Saved · {note}")
+            };
+            self.toast = Some(Toast { text, ok: true });
+        } else {
+            self.toast = Some(Toast {
+                text: format!("lock & idle failed — {note}"),
+                ok: false,
+            });
+        }
     }
 
     fn osd_test(&mut self) {
@@ -915,6 +990,7 @@ impl App {
             Screen::Animations => self.animations.render(f, pad, &self.skin),
             Screen::Waybar => self.waybar.render(f, pad, &self.skin),
             Screen::Notifications => self.notifications.render(f, pad, &self.skin),
+            Screen::LockIdle => self.lockidle.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
         }
     }
