@@ -178,6 +178,448 @@ fn seed_base(paths: &OmarchyPaths) -> String {
     )
 }
 
+// ── behavior schema + rule builder (roadmap 0.5.2) ───────────────────────────
+
+/// The type of an editable mako setting (drives the input widget + validation).
+#[derive(Debug, Clone, Copy)]
+pub enum Kind {
+    Int {
+        min: i64,
+        max: i64,
+    },
+    Enum(&'static [&'static str]),
+    Bool,
+    /// Free text (font name, icon path).
+    Text,
+}
+
+/// One editable global mako setting.
+#[derive(Debug, Clone, Copy)]
+pub struct Setting {
+    /// The mako config key, e.g. `default-timeout`.
+    pub key: &'static str,
+    pub label: &'static str,
+    pub group: &'static str,
+    pub kind: Kind,
+    /// The stock default (from `core.ini`), shown until the user overrides it.
+    pub default: &'static str,
+    pub help: &'static str,
+}
+
+use Kind::*;
+
+const fn s(
+    key: &'static str,
+    label: &'static str,
+    group: &'static str,
+    kind: Kind,
+    default: &'static str,
+    help: &'static str,
+) -> Setting {
+    Setting {
+        key,
+        label,
+        group,
+        kind,
+        default,
+        help,
+    }
+}
+
+/// Curated global-behavior schema (defaults mirror `default/mako/core.ini`).
+pub const SETTINGS: &[Setting] = &[
+    // Timing
+    s(
+        "default-timeout",
+        "Dismiss after",
+        "Timing",
+        Int { min: 0, max: 60000 },
+        "5000",
+        "Milliseconds before a notification auto-dismisses (0 = never)",
+    ),
+    // Placement
+    s(
+        "anchor",
+        "Position",
+        "Placement",
+        Enum(&[
+            "top-right",
+            "top-left",
+            "top-center",
+            "bottom-right",
+            "bottom-left",
+            "bottom-center",
+            "center-right",
+            "center-left",
+            "center",
+        ]),
+        "top-right",
+        "Which screen corner notifications stack from",
+    ),
+    s(
+        "layer",
+        "Stacking layer",
+        "Placement",
+        Enum(&["background", "bottom", "top", "overlay"]),
+        "top",
+        "How far in front of windows notifications appear",
+    ),
+    s(
+        "max-visible",
+        "Max on screen",
+        "Placement",
+        Int { min: -1, max: 20 },
+        "5",
+        "How many notifications show at once (-1 = unlimited)",
+    ),
+    s(
+        "max-history",
+        "History kept",
+        "Placement",
+        Int { min: 0, max: 500 },
+        "5",
+        "How many dismissed notifications makoctl can recall",
+    ),
+    // Size
+    s(
+        "width",
+        "Width",
+        "Size",
+        Int {
+            min: 100,
+            max: 1200,
+        },
+        "420",
+        "Notification width in pixels",
+    ),
+    s(
+        "height",
+        "Max height",
+        "Size",
+        Int { min: 20, max: 1000 },
+        "100",
+        "Maximum notification height in pixels",
+    ),
+    s(
+        "border-size",
+        "Border width",
+        "Size",
+        Int { min: 0, max: 12 },
+        "2",
+        "Thickness of the notification border",
+    ),
+    s(
+        "border-radius",
+        "Corner radius",
+        "Size",
+        Int { min: 0, max: 40 },
+        "0",
+        "Rounded corners, in pixels",
+    ),
+    s(
+        "max-icon-size",
+        "Icon size",
+        "Size",
+        Int { min: 0, max: 256 },
+        "32",
+        "Largest app icon size, in pixels (0 = hide icons)",
+    ),
+    // Grouping
+    s(
+        "group-by",
+        "Group by",
+        "Grouping",
+        Text,
+        "app-name,summary,body",
+        "Comma-separated fields that collapse similar notifications",
+    ),
+    s(
+        "font",
+        "Font",
+        "Grouping",
+        Text,
+        "sans-serif 14px",
+        "Notification font family and size",
+    ),
+];
+
+/// Look up a global setting by its mako key.
+pub fn lookup(key: &str) -> Option<&'static Setting> {
+    SETTINGS.iter().find(|s| s.key == key)
+}
+
+/// Display-ordered list of the schema's group headers.
+pub fn groups() -> Vec<&'static str> {
+    let mut seen = Vec::new();
+    for s in SETTINGS {
+        if !seen.contains(&s.group) {
+            seen.push(s.group);
+        }
+    }
+    seen
+}
+
+impl Setting {
+    /// Validate a raw value against this setting's kind, returning the
+    /// normalized text to store or a friendly error.
+    pub fn validate(&self, raw: &str) -> std::result::Result<String, String> {
+        let raw = raw.trim();
+        match self.kind {
+            Int { min, max } => {
+                let n: i64 = raw
+                    .parse()
+                    .map_err(|_| format!("{} needs a whole number", self.label))?;
+                if n < min || n > max {
+                    return Err(format!("{} must be between {min} and {max}", self.label));
+                }
+                Ok(n.to_string())
+            }
+            Bool => match raw.to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" | "on" => Ok("true".into()),
+                "false" | "0" | "no" | "off" => Ok("false".into()),
+                _ => Err(format!("{} is on or off", self.label)),
+            },
+            Enum(opts) => {
+                if opts.contains(&raw) {
+                    Ok(raw.to_string())
+                } else {
+                    Err(format!(
+                        "{} must be one of: {}",
+                        self.label,
+                        opts.join(", ")
+                    ))
+                }
+            }
+            Text => {
+                if raw.is_empty() {
+                    Err(format!("{} can't be empty", self.label))
+                } else {
+                    Ok(raw.to_string())
+                }
+            }
+        }
+    }
+}
+
+/// A per-app / per-urgency rule: match criteria plus the settings to apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rule {
+    /// Header criteria, e.g. `[("app-name", "Spotify")]` or `[("urgency", "critical")]`.
+    pub criteria: Vec<(String, String)>,
+    /// Settings applied to matching notifications, e.g. `[("invisible", "1")]`.
+    pub settings: Vec<(String, String)>,
+}
+
+impl Rule {
+    /// A human summary of the rule for list display.
+    pub fn describe(&self) -> String {
+        let crit = self
+            .criteria
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let act = self
+            .settings
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{crit} → {act}")
+    }
+}
+
+/// The editable notification behavior: global overrides + rules, materialized
+/// through [`MakoTpl`].
+pub struct MakoBehavior {
+    tpl: MakoTpl,
+    /// User-set global overrides, keyed by mako key.
+    values: std::collections::BTreeMap<String, String>,
+    /// Per-app / per-urgency rules, in order.
+    pub rules: Vec<Rule>,
+}
+
+impl MakoBehavior {
+    pub fn load(paths: &OmarchyPaths) -> Self {
+        let tpl = MakoTpl::load(paths);
+        let (values, rules) = parse_body(tpl.body());
+        Self { tpl, values, rules }
+    }
+
+    /// Whether the user's mako config is in the degraded (real-file) state.
+    pub fn degraded(&self) -> Option<&Path> {
+        self.tpl.degraded.as_deref()
+    }
+
+    /// The effective value for a global key: user override or schema default.
+    pub fn value(&self, key: &str) -> String {
+        if let Some(v) = self.values.get(key) {
+            return v.clone();
+        }
+        lookup(key)
+            .map(|s| s.default.to_string())
+            .unwrap_or_default()
+    }
+
+    /// Whether the user has overridden this global key.
+    pub fn is_overridden(&self, key: &str) -> bool {
+        self.values.contains_key(key)
+    }
+
+    /// Set a global override (validated). Setting it to exactly the default
+    /// clears the override so the block stays minimal.
+    pub fn set(&mut self, key: &str, raw: &str) -> std::result::Result<(), String> {
+        let setting = lookup(key).ok_or_else(|| format!("unknown setting `{key}`"))?;
+        let value = setting.validate(raw)?;
+        if value == setting.default {
+            self.values.remove(key);
+        } else {
+            self.values.insert(key.to_string(), value);
+        }
+        Ok(())
+    }
+
+    pub fn clear(&mut self, key: &str) {
+        self.values.remove(key);
+    }
+
+    pub fn add_rule(&mut self, rule: Rule) {
+        self.rules.push(rule);
+    }
+
+    pub fn remove_rule(&mut self, index: usize) {
+        if index < self.rules.len() {
+            self.rules.remove(index);
+        }
+    }
+
+    /// The managed-block body this behavior renders to.
+    pub fn body(&self) -> String {
+        render_body(&self.values, &self.rules)
+    }
+
+    pub fn tpl_path(&self) -> &Path {
+        self.tpl.path()
+    }
+
+    /// Write the template + regenerate + reload. Caller snapshots first.
+    pub fn apply(&self, runner: &dyn crate::cmd::CommandRunner) -> Result<()> {
+        self.tpl.apply(&self.body(), runner)
+    }
+}
+
+/// Parse a managed-block body into global overrides + rules.
+fn parse_body(body: &str) -> (std::collections::BTreeMap<String, String>, Vec<Rule>) {
+    let mut values = std::collections::BTreeMap::new();
+    let mut rules: Vec<Rule> = Vec::new();
+    let mut cur: Option<Rule> = None;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if let Some(inner) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if let Some(r) = cur.take() {
+                rules.push(r);
+            }
+            let criteria = inner
+                .split_whitespace()
+                .filter_map(|kv| {
+                    kv.split_once('=')
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                })
+                .collect();
+            cur = Some(Rule {
+                criteria,
+                settings: vec![],
+            });
+        } else if let Some((k, v)) = t.split_once('=') {
+            let (k, v) = (k.trim().to_string(), v.trim().to_string());
+            match &mut cur {
+                Some(r) => r.settings.push((k, v)),
+                None => {
+                    values.insert(k, v);
+                }
+            }
+        }
+    }
+    if let Some(r) = cur.take() {
+        rules.push(r);
+    }
+    (values, rules)
+}
+
+fn render_body(values: &std::collections::BTreeMap<String, String>, rules: &[Rule]) -> String {
+    let mut out = String::new();
+    for (k, v) in values {
+        out.push_str(&format!("{k}={v}\n"));
+    }
+    for r in rules {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let header = r
+            .criteria
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str(&format!("[{header}]\n"));
+        for (k, v) in &r.settings {
+            out.push_str(&format!("{k}={v}\n"));
+        }
+    }
+    out
+}
+
+// ── Do Not Disturb + live test (roadmap 0.5.2) ───────────────────────────────
+
+/// Whether the daemon is currently in `do-not-disturb` mode.
+pub fn dnd_active(runner: &dyn crate::cmd::CommandRunner) -> bool {
+    runner
+        .run(&cmds::makoctl_mode_list())
+        .map(|o| o.stdout.lines().any(|l| l.trim() == "do-not-disturb"))
+        .unwrap_or(false)
+}
+
+/// Turn `do-not-disturb` on or off (live, via makoctl — not persisted).
+pub fn set_dnd(runner: &dyn crate::cmd::CommandRunner, on: bool) -> Result<()> {
+    let cmd = if on {
+        cmds::makoctl_mode_add("do-not-disturb")
+    } else {
+        cmds::makoctl_mode_remove("do-not-disturb")
+    };
+    let out = runner.run(&cmd)?;
+    if !out.ok() {
+        return Err(StudioError::External {
+            cmd: "makoctl mode".into(),
+            detail: out.stderr.trim().to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// The three live-test urgency levels, in display order.
+pub const SAMPLE_URGENCIES: [&str; 3] = ["low", "normal", "critical"];
+
+/// Fire a sample notification at the given urgency so the user can see their
+/// settings in action (FR6.3).
+pub fn send_sample(runner: &dyn crate::cmd::CommandRunner, urgency: &str) -> Result<()> {
+    let (summary, body) = match urgency {
+        "low" => ("Low priority", "A quiet heads-up from Omarchy Studio"),
+        "critical" => ("Critical alert", "This one stays until you dismiss it"),
+        _ => ("Notification", "A normal notification from Omarchy Studio"),
+    };
+    let out = runner.run(&cmds::notify_send(urgency, summary, body))?;
+    if !out.ok() {
+        return Err(StudioError::External {
+            cmd: "notify-send".into(),
+            detail: out.stderr.trim().to_string(),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +711,99 @@ mod tests {
         std::fs::write(&link, "anchor=top-left\n").unwrap();
         let tpl = MakoTpl::load(&paths);
         assert_eq!(tpl.degraded, Some(link));
+    }
+
+    #[test]
+    fn behavior_overrides_and_rules_round_trip() {
+        let paths = fake_paths("behavior");
+        write_builtin(&paths);
+
+        let mut b = MakoBehavior::load(&paths);
+        // defaults come from the schema until overridden
+        assert_eq!(b.value("default-timeout"), "5000");
+        assert!(!b.is_overridden("default-timeout"));
+
+        b.set("default-timeout", "8000").unwrap();
+        b.set("anchor", "bottom-right").unwrap();
+        // setting back to default clears the override (keeps the block minimal)
+        b.set("width", "420").unwrap();
+        assert!(!b.is_overridden("width"));
+
+        b.add_rule(Rule {
+            criteria: vec![("app-name".into(), "Spotify".into())],
+            settings: vec![("invisible".into(), "1".into())],
+        });
+        b.add_rule(Rule {
+            criteria: vec![("urgency".into(), "critical".into())],
+            settings: vec![("default-timeout".into(), "0".into())],
+        });
+        b.apply(&crate::cmd::StubRunner::default().with_ok("omarchy-theme-refresh", ""))
+            .unwrap();
+
+        // reload from disk → overrides + rules survive
+        let re = MakoBehavior::load(&paths);
+        assert_eq!(re.value("default-timeout"), "8000");
+        assert_eq!(re.value("anchor"), "bottom-right");
+        assert!(!re.is_overridden("width"));
+        assert_eq!(re.rules.len(), 2);
+        assert_eq!(re.rules[0].describe(), "app-name=Spotify → invisible=1");
+        assert_eq!(
+            re.rules[1].describe(),
+            "urgency=critical → default-timeout=0"
+        );
+
+        // theme colours still present in the written template
+        let out = std::fs::read_to_string(tpl_path(&paths)).unwrap();
+        assert!(out.contains("{{ foreground }}"));
+        assert!(out.contains("default-timeout=8000"));
+        assert!(out.contains("[app-name=Spotify]"));
+    }
+
+    #[test]
+    fn validation_rejects_bad_values() {
+        assert!(lookup("default-timeout")
+            .unwrap()
+            .validate("999999")
+            .is_err());
+        assert!(lookup("anchor").unwrap().validate("sideways").is_err());
+        assert_eq!(
+            lookup("default-timeout")
+                .unwrap()
+                .validate(" 3000 ")
+                .unwrap(),
+            "3000"
+        );
+        assert_eq!(
+            lookup("anchor").unwrap().validate("center").unwrap(),
+            "center"
+        );
+    }
+
+    #[test]
+    fn dnd_reads_and_toggles_via_makoctl() {
+        use crate::cmd::StubRunner;
+        // active when the mode list contains do-not-disturb
+        let on = StubRunner::default().with_ok("makoctl mode", "default\ndo-not-disturb\n");
+        assert!(dnd_active(&on));
+        let off = StubRunner::default().with_ok("makoctl mode", "default\n");
+        assert!(!dnd_active(&off));
+
+        let r = StubRunner::default().with_ok("makoctl mode -a do-not-disturb", "");
+        assert!(set_dnd(&r, true).is_ok());
+        let r = StubRunner::default().with_ok("makoctl mode -r do-not-disturb", "");
+        assert!(set_dnd(&r, false).is_ok());
+    }
+
+    #[test]
+    fn send_sample_shells_out_to_notify_send() {
+        let r = crate::cmd::StubRunner::default().with_ok(
+            "notify-send -u critical Critical alert This one stays until you dismiss it",
+            "",
+        );
+        assert!(send_sample(&r, "critical").is_ok());
+        assert!(r
+            .calls()
+            .iter()
+            .any(|c| c.contains("notify-send -u critical")));
     }
 }

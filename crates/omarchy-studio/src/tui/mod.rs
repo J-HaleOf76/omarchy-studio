@@ -12,6 +12,7 @@ mod screens {
     pub mod animations;
     pub mod keybinds;
     pub mod looknfeel;
+    pub mod notifications;
     pub mod palette_editor;
     pub mod themes;
     pub mod waybar;
@@ -31,6 +32,7 @@ use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 use screens::animations::{AnimAction, AnimationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
+use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
 use screens::waybar::{WaybarAction, WaybarScreen};
@@ -109,6 +111,7 @@ struct App {
     looknfeel: LookFeelScreen,
     animations: AnimationsScreen,
     waybar: WaybarScreen,
+    notifications: NotificationsScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -133,6 +136,8 @@ impl App {
         let looknfeel = LookFeelScreen::load(&paths);
         let animations = AnimationsScreen::load(&paths);
         let waybar = WaybarScreen::load(&paths);
+        let mut notifications = NotificationsScreen::load(&paths);
+        notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         Self {
             paths,
             skin,
@@ -142,6 +147,7 @@ impl App {
             looknfeel,
             animations,
             waybar,
+            notifications,
             editor: None,
             palette: None,
             help: false,
@@ -172,7 +178,8 @@ impl App {
         let capturing = (matches!(self.screen, Screen::Themes) && self.themes.is_capturing())
             || (matches!(self.screen, Screen::Keybinds) && self.keybinds.is_capturing())
             || (matches!(self.screen, Screen::LookFeel) && self.looknfeel.is_modal())
-            || (matches!(self.screen, Screen::Waybar) && self.waybar.is_modal());
+            || (matches!(self.screen, Screen::Waybar) && self.waybar.is_modal())
+            || (matches!(self.screen, Screen::Notifications) && self.notifications.is_modal());
         if !capturing {
             match key.code {
                 KeyCode::Char('q') => {
@@ -309,6 +316,12 @@ impl App {
                 WaybarAction::None => {}
                 WaybarAction::Apply => self.apply_waybar(),
             },
+            Screen::Notifications => match self.notifications.handle(key) {
+                NotifAction::None => {}
+                NotifAction::Save => self.apply_notifications(),
+                NotifAction::ToggleDnd => self.toggle_dnd(),
+                NotifAction::Test(urgency) => self.notif_test(&urgency),
+            },
             _ => {}
         }
     }
@@ -362,6 +375,90 @@ impl App {
                 });
             }
         }
+    }
+
+    /// Snapshot the mako template, write behavior, regenerate + reload, refresh.
+    fn apply_notifications(&mut self) {
+        let file = self.notifications.model().tpl_path().to_path_buf();
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before: notification behavior",
+                std::slice::from_ref(&file),
+                "mako",
+                &[],
+            );
+        }
+        match self.notifications.model().apply(&RealRunner) {
+            Ok(()) => {
+                if let Ok(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        "notification behavior",
+                        std::slice::from_ref(&file),
+                        "mako",
+                        &[],
+                    );
+                }
+                self.notifications.reload(&self.paths);
+                self.refresh_dnd();
+                self.toast = Some(Toast {
+                    text: "Saved notification behavior · undo from Snapshots".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("mako apply failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Flip Do Not Disturb live and reflect the new state on the screen.
+    fn toggle_dnd(&mut self) {
+        use studio_core::modules::mako;
+        let now = mako::dnd_active(&RealRunner);
+        match mako::set_dnd(&RealRunner, !now) {
+            Ok(()) => {
+                self.notifications.set_dnd(Some(!now));
+                self.toast = Some(Toast {
+                    text: format!("Do Not Disturb {}", if !now { "on" } else { "off" }),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't toggle DND: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    fn notif_test(&mut self, urgency: &str) {
+        use studio_core::modules::mako;
+        self.toast = Some(match mako::send_sample(&RealRunner, urgency) {
+            Ok(()) => Toast {
+                text: format!("sent a {urgency} test notification"),
+                ok: true,
+            },
+            Err(e) => Toast {
+                text: format!("couldn't send test: {}", brief(e)),
+                ok: false,
+            },
+        });
+    }
+
+    fn refresh_dnd(&mut self) {
+        use studio_core::modules::mako;
+        self.notifications
+            .set_dnd(Some(mako::dnd_active(&RealRunner)));
     }
 
     /// Snapshot looknfeel.conf, apply an animation preset, live-reload, refresh.
@@ -802,6 +899,7 @@ impl App {
             Screen::LookFeel => self.looknfeel.render(f, pad, &self.skin),
             Screen::Animations => self.animations.render(f, pad, &self.skin),
             Screen::Waybar => self.waybar.render(f, pad, &self.skin),
+            Screen::Notifications => self.notifications.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
         }
     }

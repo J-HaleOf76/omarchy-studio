@@ -32,6 +32,7 @@ fn main() {
         ["toggle", rest @ ..] => toggle(rest),
         ["animations", rest @ ..] => animations(rest),
         ["waybar", rest @ ..] => waybar(rest),
+        ["notif", rest @ ..] => notif(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -704,6 +705,158 @@ fn waybar_style(paths: &OmarchyPaths, args: &[&str]) -> i32 {
             1
         }
     }
+}
+
+fn notif(args: &[&str]) -> i32 {
+    use studio_core::modules::mako::{
+        dnd_active, lookup, send_sample, set_dnd, MakoBehavior, Rule, SAMPLE_URGENCIES, SETTINGS,
+    };
+    let Some(paths) = omarchy() else { return 4 };
+
+    // Live-only verbs (no config write) first.
+    match args {
+        ["dnd", "status"] | ["dnd"] => {
+            println!(
+                "do-not-disturb is {}",
+                if dnd_active(&RealRunner) { "on" } else { "off" }
+            );
+            return 0;
+        }
+        ["dnd", state @ ("on" | "off")] => {
+            return match set_dnd(&RealRunner, *state == "on") {
+                Ok(()) => {
+                    println!("do-not-disturb {state}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("{e:?}");
+                    1
+                }
+            };
+        }
+        ["test", urgency] if SAMPLE_URGENCIES.contains(urgency) => {
+            return match send_sample(&RealRunner, urgency) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("{e:?}");
+                    1
+                }
+            };
+        }
+        _ => {}
+    }
+
+    let mut b = MakoBehavior::load(&paths);
+    if let Some(real) = b.degraded() {
+        eprintln!(
+            "note: ~/.config/mako/config is a real file ({}), not the theme symlink — \
+             theming won't reach mako. Restore the symlink for full Studio support.",
+            real.display()
+        );
+    }
+
+    let (summary, changed) = match args {
+        ["list"] | [] => {
+            for s in SETTINGS {
+                let mark = if b.is_overridden(s.key) { "*" } else { " " };
+                println!("{mark} {:<16} {:>22}   {}", s.key, b.value(s.key), s.label);
+            }
+            if !b.rules.is_empty() {
+                println!("\nrules:");
+                for (i, r) in b.rules.iter().enumerate() {
+                    println!("  [{i}] {}", r.describe());
+                }
+            }
+            println!("\n(* = changed from the Omarchy default)");
+            return 0;
+        }
+        ["get", key] => {
+            if lookup(key).is_none() {
+                eprintln!("unknown setting `{key}` — see `notif list`");
+                return 2;
+            }
+            println!("{}", b.value(key));
+            return 0;
+        }
+        ["set", key, value] => {
+            if let Err(e) = b.set(key, value) {
+                eprintln!("{e}");
+                return 2;
+            }
+            (format!("notif {key}={}", b.value(key)), true)
+        }
+        ["rule", "add", crit, action] => match (parse_pairs(crit), parse_pairs(action)) {
+            (Some(criteria), Some(settings)) if !criteria.is_empty() && !settings.is_empty() => {
+                b.add_rule(Rule { criteria, settings });
+                ("notif rule added".to_string(), true)
+            }
+            _ => {
+                eprintln!(
+                    "usage: notif rule add <k=v[,k=v]> <k=v[,k=v]>  (criteria, then settings)"
+                );
+                return 2;
+            }
+        },
+        ["rule", "remove", idx] => match idx.parse::<usize>() {
+            Ok(i) if i < b.rules.len() => {
+                b.remove_rule(i);
+                (format!("notif rule {i} removed"), true)
+            }
+            _ => {
+                eprintln!("no rule #{idx} — see `notif list`");
+                return 2;
+            }
+        },
+        _ => {
+            eprintln!(
+                "usage: notif list | get <key> | set <key> <value> | rule add <crit> <action> | rule remove <n> | dnd on|off|status | test low|normal|critical"
+            );
+            return 2;
+        }
+    };
+    let _ = changed;
+
+    // Snapshot the template, apply (write → theme-refresh → reload).
+    let file = b.tpl_path().to_path_buf();
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            std::slice::from_ref(&file),
+            "mako",
+            &[],
+        );
+    }
+    match b.apply(&RealRunner) {
+        Ok(()) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    &summary,
+                    std::slice::from_ref(&file),
+                    "mako",
+                    &[],
+                );
+            }
+            println!("{summary} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("apply failed: {e:?}");
+            1
+        }
+    }
+}
+
+/// Parse `k=v,k=v` into pairs, or None if any token lacks an `=`.
+fn parse_pairs(s: &str) -> Option<Vec<(String, String)>> {
+    s.split(',')
+        .map(|kv| {
+            kv.split_once('=')
+                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect()
 }
 
 fn toggle(args: &[&str]) -> i32 {
