@@ -236,6 +236,102 @@ fn edit_err(e: String) -> StudioError {
     }
 }
 
+// ── style.css geometry (roadmap 0.4.4) ───────────────────────────────────────
+
+use crate::configfs::{CommentStyle, ManagedBlock};
+
+/// A couple of safe geometry knobs written to a managed CSS block at the end of
+/// the user's `style.css` — after the theme `@import`, so it wins. We never
+/// touch the import or the user's own rules.
+#[derive(Default)]
+pub struct WaybarStyle {
+    pub font_size: Option<u32>,
+    pub radius: Option<u32>,
+}
+
+fn style_path(paths: &OmarchyPaths) -> PathBuf {
+    paths
+        .config
+        .parent()
+        .map(|c| c.join("waybar/style.css"))
+        .unwrap_or_else(|| PathBuf::from("waybar/style.css"))
+}
+
+fn style_block() -> ManagedBlock {
+    ManagedBlock::new("waybar-style", CommentStyle::CBlock)
+}
+
+impl WaybarStyle {
+    pub fn load(paths: &OmarchyPaths) -> Self {
+        let mut s = Self::default();
+        if let Ok(text) = std::fs::read_to_string(style_path(paths)) {
+            if let Some(body) = style_block().extract(&text) {
+                s.font_size = grab_px(body, "font-size");
+                s.radius = grab_px(body, "border-radius");
+            }
+        }
+        s
+    }
+
+    fn body(&self) -> String {
+        let mut decls = String::new();
+        if let Some(fs) = self.font_size {
+            decls.push_str(&format!("  font-size: {fs}px;\n"));
+        }
+        if let Some(r) = self.radius {
+            decls.push_str(&format!("  border-radius: {r}px;\n"));
+        }
+        format!("* {{\n{decls}}}")
+    }
+
+    fn is_empty(&self) -> bool {
+        self.font_size.is_none() && self.radius.is_none()
+    }
+
+    /// Write the managed block into style.css (removed when empty). The block
+    /// always lands at the end, after any `@import`. Returns the path.
+    pub fn save(&self, paths: &OmarchyPaths) -> Result<PathBuf> {
+        let path = style_path(paths);
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let updated = if self.is_empty() {
+            style_block().remove(&existing)
+        } else {
+            style_block().upsert(&existing, &self.body())
+        };
+        crate::configfs::atomic_write(&path, &updated)?;
+        Ok(path)
+    }
+
+    pub fn apply(
+        &self,
+        paths: &OmarchyPaths,
+        runner: &dyn crate::cmd::CommandRunner,
+    ) -> Result<PathBuf> {
+        let path = self.save(paths)?;
+        let out = runner.run(&crate::omarchy::cmds::restart(Component::Waybar))?;
+        if !out.ok() {
+            return Err(StudioError::External {
+                cmd: "omarchy-restart-waybar".into(),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(path)
+    }
+}
+
+/// Pull an integer px value for a CSS property out of a block body.
+fn grab_px(body: &str, prop: &str) -> Option<u32> {
+    let needle = format!("{prop}:");
+    let start = body.find(&needle)? + needle.len();
+    let rest = &body[start..];
+    let digits: String = rest
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,5 +430,41 @@ mod tests {
                                              // reloads to the same state
         let wb2 = WaybarConfig::load(&paths).unwrap();
         assert_eq!(wb2.lane("modules-left"), vec!["cpu", "clock"]);
+    }
+
+    #[test]
+    fn style_geometry_block_after_import_and_round_trips() {
+        let paths = fake_paths("style");
+        let css = "@import \"theme.css\";\n\n* {\n  font-size: 12px;\n}\n";
+        std::fs::write(style_path(&paths), css).unwrap();
+
+        let mut st = WaybarStyle::load(&paths);
+        assert!(st.font_size.is_none()); // nothing managed yet
+        st.font_size = Some(14);
+        st.radius = Some(6);
+        st.save(&paths).unwrap();
+
+        let out = std::fs::read_to_string(style_path(&paths)).unwrap();
+        // the @import stays first; our block is appended after the user's rules
+        assert!(out.starts_with("@import"));
+        let import_pos = out.find("@import").unwrap();
+        let block_pos = out.find("omarchy-studio:waybar-style").unwrap();
+        assert!(import_pos < block_pos, "managed block must follow @import");
+        assert!(out.contains("font-size: 14px"));
+        assert!(out.contains("border-radius: 6px"));
+        // the user's own rule is untouched
+        assert!(out.contains("font-size: 12px"));
+
+        // reload reads the managed values back
+        let re = WaybarStyle::load(&paths);
+        assert_eq!(re.font_size, Some(14));
+        assert_eq!(re.radius, Some(6));
+
+        // clearing removes the block, leaving the original css intact
+        let empty = WaybarStyle::default();
+        empty.save(&paths).unwrap();
+        let cleared = std::fs::read_to_string(style_path(&paths)).unwrap();
+        assert!(!cleared.contains("omarchy-studio:waybar-style"));
+        assert_eq!(cleared, css);
     }
 }

@@ -476,6 +476,11 @@ fn waybar(args: &[&str]) -> i32 {
         _ => None,
     };
 
+    // Geometry via style.css managed block (font-size / radius).
+    if let ["style", rest @ ..] = args {
+        return waybar_style(&paths, rest);
+    }
+
     // Read-only listing needs no snapshot.
     if let ["modules"] | [] = args {
         match WaybarConfig::load(&paths) {
@@ -568,6 +573,87 @@ fn waybar(args: &[&str]) -> i32 {
                 eprintln!("apply failed: {e:?}");
                 1
             }
+        }
+    }
+}
+
+fn waybar_style(paths: &OmarchyPaths, args: &[&str]) -> i32 {
+    use studio_core::modules::waybar::WaybarStyle;
+    let mut style = WaybarStyle::load(paths);
+    let summary: String = match args {
+        ["show"] | [] => {
+            let fs = style
+                .font_size
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "default".into());
+            let r = style
+                .radius
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "default".into());
+            println!("font-size: {fs}\nradius:    {r}");
+            return 0;
+        }
+        ["font-size", n] => match n.parse::<u32>() {
+            Ok(v) if (6..=40).contains(&v) => {
+                style.font_size = Some(v);
+                format!("waybar font-size {v}px")
+            }
+            _ => {
+                eprintln!("font-size must be 6–40");
+                return 2;
+            }
+        },
+        ["radius", n] => match n.parse::<u32>() {
+            Ok(v) if v <= 30 => {
+                style.radius = Some(v);
+                format!("waybar radius {v}px")
+            }
+            _ => {
+                eprintln!("radius must be 0–30");
+                return 2;
+            }
+        },
+        ["reset"] => {
+            style = WaybarStyle::default();
+            "waybar style reset".into()
+        }
+        _ => {
+            eprintln!("usage: waybar style show | font-size <n> | radius <n> | reset");
+            return 2;
+        }
+    };
+    let store = history().ok();
+    let path = paths
+        .config
+        .parent()
+        .map(|c| c.join("waybar/style.css"))
+        .unwrap_or_default();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            std::slice::from_ref(&path),
+            "waybar",
+            &[],
+        );
+    }
+    match style.apply(paths, &RealRunner) {
+        Ok(_) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    &summary,
+                    std::slice::from_ref(&path),
+                    "waybar",
+                    &[],
+                );
+            }
+            println!("{summary} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("apply failed: {e:?}");
+            1
         }
     }
 }
