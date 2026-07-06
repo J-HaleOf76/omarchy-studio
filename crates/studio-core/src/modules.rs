@@ -15,6 +15,7 @@
 pub mod animations;
 pub mod color;
 pub mod dispatchers;
+pub mod extraction;
 pub mod keybinds;
 pub mod lockidle;
 pub mod looknfeel;

@@ -276,9 +276,38 @@ fn theme(args: &[&str]) -> i32 {
                 }
             }
         }
+        // Preview a palette extracted from an image (spec 04 §4). The
+        // theme-from-wallpaper wizard (0.6.5) builds on this; here it prints
+        // the colors.toml so the result is scriptable today.
+        ["extract", image, rest @ ..] => {
+            use studio_core::modules::extraction::{extract_image, Bias, Mode};
+            let mode = rest
+                .first()
+                .and_then(|s| Mode::parse(s))
+                .unwrap_or(Mode::Normal);
+            let bias = rest
+                .get(1)
+                .and_then(|s| Bias::parse(s))
+                .unwrap_or(Bias::Auto);
+            match extract_image(std::path::Path::new(image), mode, bias) {
+                Ok(ex) => {
+                    print!("{}", ex.to_colors_toml());
+                    eprintln!(
+                        "\n# {} · {} — pipe into a theme's colors.toml, or wait for `theme new --from-image`",
+                        mode.label(),
+                        if ex.light { "light" } else { "dark" }
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("extraction failed: {e:?}");
+                    1
+                }
+            }
+        }
         _ => {
             eprintln!(
-                "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new>"
+                "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new> | extract <image> [normal|muted|material] [auto|dark|light]"
             );
             2
         }
