@@ -533,9 +533,52 @@ fn waybar(args: &[&str]) -> i32 {
                 cfg.set_scalar(path, value),
                 format!("waybar set {path}={value}"),
             ),
+            ["new", name, rest @ ..] => {
+                use studio_core::modules::waybar::CustomSpec;
+                let mut spec = CustomSpec {
+                    name: (*name).to_string(),
+                    format: "{}".into(),
+                    ..Default::default()
+                };
+                let mut lane = "left";
+                let mut it = rest.iter();
+                while let Some(flag) = it.next() {
+                    let Some(val) = it.next() else {
+                        eprintln!("{flag} needs a value");
+                        return 2;
+                    };
+                    match *flag {
+                        "--exec" => spec.exec = (*val).to_string(),
+                        "--interval" => match val.parse::<u32>() {
+                            Ok(n) => spec.interval = Some(n),
+                            Err(_) => {
+                                eprintln!("--interval must be a number of seconds");
+                                return 2;
+                            }
+                        },
+                        "--format" => spec.format = (*val).to_string(),
+                        "--on-click" => spec.on_click = Some((*val).to_string()),
+                        "--lane" => lane = val,
+                        other => {
+                            eprintln!("unknown flag {other}");
+                            return 2;
+                        }
+                    }
+                }
+                if spec.exec.trim().is_empty() {
+                    eprintln!("a custom module needs --exec <command>");
+                    return 2;
+                }
+                let Some(l) = lane_key(lane) else {
+                    eprintln!("--lane must be left|center|right");
+                    return 2;
+                };
+                let summary = format!("waybar new custom/{} → {lane}", spec.slug());
+                (cfg.add_custom_module(&spec, l).map(|_| ()), summary)
+            }
             _ => {
                 eprintln!(
-                    "usage: waybar modules | add <lane> <id> | remove <lane> <id> | move <id> <lane> | set <path> <value>"
+                    "usage: waybar modules | add <lane> <id> | remove <lane> <id> | move <id> <lane> | set <path> <value> | new <name> --exec <cmd> [--interval N] [--format F] [--on-click C] [--lane left|center|right]"
                 );
                 return 2;
             }

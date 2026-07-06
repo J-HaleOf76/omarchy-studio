@@ -207,6 +207,29 @@ impl WaybarConfig {
         self.doc.set_scalar(path, raw).map_err(edit_err)
     }
 
+    /// Scaffold a `custom/<name>` module from a plain-language spec: write its
+    /// config object at the root and drop the module id into `lane`. Returns the
+    /// full module id (`custom/<name>`).
+    pub fn add_custom_module(&mut self, spec: &CustomSpec, lane: &str) -> Result<String> {
+        let name = spec.slug();
+        if name.is_empty() {
+            return Err(edit_err("a custom module needs a name".into()));
+        }
+        let id = format!("custom/{name}");
+        let mut entries: Vec<String> = vec![format!("\"exec\": \"{}\"", json_escape(&spec.exec))];
+        if let Some(iv) = spec.interval {
+            entries.push(format!("\"interval\": {iv}"));
+        }
+        entries.push(format!("\"format\": \"{}\"", json_escape(&spec.format)));
+        if let Some(oc) = spec.on_click.as_deref().filter(|s| !s.trim().is_empty()) {
+            entries.push(format!("\"on-click\": \"{}\"", json_escape(oc)));
+        }
+        let value = format!("{{\n  {}\n}}", entries.join(",\n  "));
+        self.doc.insert_member("", &id, &value).map_err(edit_err)?;
+        self.add(lane, &id)?;
+        Ok(id)
+    }
+
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
@@ -234,6 +257,55 @@ fn edit_err(e: String) -> StudioError {
         cmd: "edit waybar config".into(),
         detail: e,
     }
+}
+
+/// A plain-language description of a script-driven Waybar module, as gathered by
+/// the custom-module wizard (roadmap 0.4.5).
+#[derive(Debug, Clone, Default)]
+pub struct CustomSpec {
+    /// Human name (becomes the `custom/<slug>` id).
+    pub name: String,
+    /// The shell command that produces the module's text.
+    pub exec: String,
+    /// How often to re-run it, in seconds (None = run once / signal-driven).
+    pub interval: Option<u32>,
+    /// The display format (defaults to `{}` — the command's raw output).
+    pub format: String,
+    /// Optional command to run when the module is clicked.
+    pub on_click: Option<String>,
+}
+
+impl CustomSpec {
+    /// The `custom/<slug>` suffix — lowercased, non-alphanumerics to dashes.
+    pub fn slug(&self) -> String {
+        let mut out = String::new();
+        let mut prev_dash = false;
+        for ch in self.name.trim().chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch.to_ascii_lowercase());
+                prev_dash = false;
+            } else if !prev_dash && !out.is_empty() {
+                out.push('-');
+                prev_dash = true;
+            }
+        }
+        out.trim_end_matches('-').to_string()
+    }
+}
+
+/// Escape a string for embedding in a JSON double-quoted literal.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 // ── style.css geometry (roadmap 0.4.4) ───────────────────────────────────────
@@ -430,6 +502,49 @@ mod tests {
                                              // reloads to the same state
         let wb2 = WaybarConfig::load(&paths).unwrap();
         assert_eq!(wb2.lane("modules-left"), vec!["cpu", "clock"]);
+    }
+
+    #[test]
+    fn custom_module_wizard_scaffolds_config_and_lane_entry() {
+        let paths = fake_paths("custom");
+        std::fs::write(
+            config_path(&paths),
+            "{\n  \"modules-left\": [\"clock\"],\n  \"modules-center\": [],\n  \"modules-right\": []\n}\n",
+        )
+        .unwrap();
+
+        let mut wb = WaybarConfig::load(&paths).unwrap();
+        let spec = CustomSpec {
+            name: "My Weather!".into(),
+            exec: "curl wttr.in?format=3".into(),
+            interval: Some(600),
+            format: "{}".into(),
+            on_click: Some("xdg-open https://wttr.in".into()),
+        };
+        let id = wb.add_custom_module(&spec, "modules-right").unwrap();
+        assert_eq!(id, "custom/my-weather");
+        assert_eq!(wb.lane("modules-right"), vec!["custom/my-weather"]);
+
+        wb.save().unwrap();
+        let re = WaybarConfig::load(&paths).unwrap();
+        // config object landed and is reachable + valid
+        let on_disk = std::fs::read_to_string(config_path(&paths)).unwrap();
+        assert!(on_disk.contains("\"custom/my-weather\""));
+        assert_eq!(re.lane("modules-right"), vec!["custom/my-weather"]);
+        assert!(on_disk.contains("\"interval\": 600"));
+        assert!(on_disk.contains("\"on-click\""));
+        // the original module survived
+        assert_eq!(re.lane("modules-left"), vec!["clock"]);
+    }
+
+    #[test]
+    fn slug_and_escape_are_sane() {
+        let s = CustomSpec {
+            name: "  Foo Bar / Baz  ".into(),
+            ..Default::default()
+        };
+        assert_eq!(s.slug(), "foo-bar-baz");
+        assert_eq!(json_escape(r#"say "hi"\ok"#), r#"say \"hi\"\\ok"#);
     }
 
     #[test]

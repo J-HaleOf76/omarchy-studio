@@ -12,7 +12,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use studio_core::cmd::CommandRunner;
-use studio_core::modules::waybar::{label_for, WaybarConfig, LANES, MODULES};
+use studio_core::modules::waybar::{label_for, CustomSpec, WaybarConfig, LANES, MODULES};
 use studio_core::omarchy::OmarchyPaths;
 
 use crate::tui::theme::Skin;
@@ -23,6 +23,60 @@ pub enum WaybarAction {
     Apply,
 }
 
+/// The custom-module wizard's text fields (roadmap 0.4.5).
+const WIZARD_LABELS: [&str; 5] = [
+    "Name",
+    "Command to run",
+    "Refresh (seconds, blank = once)",
+    "Display format",
+    "On click (optional)",
+];
+
+/// A little form for scaffolding a `custom/*` module in plain language.
+struct Wizard {
+    fields: [String; 5],
+    focus: usize,
+    /// Lane the new module lands in (index into LANES).
+    lane: usize,
+    error: Option<String>,
+}
+
+impl Wizard {
+    fn new(lane: usize) -> Self {
+        let mut fields: [String; 5] = Default::default();
+        fields[3] = "{}".to_string(); // sensible default format
+        Self {
+            fields,
+            focus: 0,
+            lane,
+            error: None,
+        }
+    }
+
+    fn spec(&self) -> CustomSpec {
+        let interval = self.fields[2].trim().parse::<u32>().ok();
+        let on_click = {
+            let s = self.fields[4].trim();
+            (!s.is_empty()).then(|| s.to_string())
+        };
+        let format = {
+            let f = self.fields[3].trim();
+            if f.is_empty() {
+                "{}".into()
+            } else {
+                f.to_string()
+            }
+        };
+        CustomSpec {
+            name: self.fields[0].trim().to_string(),
+            exec: self.fields[1].trim().to_string(),
+            interval,
+            format,
+            on_click,
+        }
+    }
+}
+
 pub struct WaybarScreen {
     cfg: Option<WaybarConfig>,
     error: Option<String>,
@@ -31,6 +85,8 @@ pub struct WaybarScreen {
     dirty: bool,
     /// Catalog picker overlay (add), Some(selected catalog index) while open.
     picker: Option<usize>,
+    /// Custom-module wizard overlay, open when adding a `custom/*` module.
+    wizard: Option<Wizard>,
 }
 
 impl WaybarScreen {
@@ -45,6 +101,7 @@ impl WaybarScreen {
             cursor: 0,
             dirty: false,
             picker: None,
+            wizard: None,
         }
     }
 
@@ -55,7 +112,7 @@ impl WaybarScreen {
     }
 
     pub fn is_modal(&self) -> bool {
-        self.picker.is_some()
+        self.picker.is_some() || self.wizard.is_some()
     }
 
     /// The (lane, module-index) pairs in display order.
@@ -82,6 +139,9 @@ impl WaybarScreen {
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> WaybarAction {
+        if self.wizard.is_some() {
+            return self.handle_wizard(key);
+        }
         if self.picker.is_some() {
             return self.handle_picker(key);
         }
@@ -175,14 +235,52 @@ impl WaybarScreen {
                 let module = MODULES[*sel];
                 // add to the lane the cursor is currently in (default left)
                 let li = self.selected().map(|(li, _)| li).unwrap_or(0);
-                let lane = LANES[li];
-                // strip the trailing "/*" from custom/group catalog ids
-                let id = module.id.trim_end_matches("/*");
-                let id = if id.is_empty() { "custom/new" } else { id };
-                if self.cfg.as_mut().unwrap().add(lane, id).is_ok() {
+                self.picker = None;
+                // A custom/group catalog entry opens the wizard rather than
+                // dropping a placeholder; a concrete module is added directly.
+                if module.id.ends_with("/*") {
+                    self.wizard = Some(Wizard::new(li));
+                } else if self.cfg.as_mut().unwrap().add(LANES[li], module.id).is_ok() {
                     self.dirty = true;
                 }
-                self.picker = None;
+            }
+            _ => {}
+        }
+        WaybarAction::None
+    }
+
+    fn handle_wizard(&mut self, key: KeyEvent) -> WaybarAction {
+        let Some(wiz) = self.wizard.as_mut() else {
+            return WaybarAction::None;
+        };
+        match key.code {
+            KeyCode::Esc => self.wizard = None,
+            KeyCode::Tab | KeyCode::Down => wiz.focus = (wiz.focus + 1) % WIZARD_LABELS.len(),
+            KeyCode::BackTab | KeyCode::Up => {
+                wiz.focus = (wiz.focus + WIZARD_LABELS.len() - 1) % WIZARD_LABELS.len()
+            }
+            KeyCode::Backspace => {
+                wiz.fields[wiz.focus].pop();
+            }
+            KeyCode::Char(c) => wiz.fields[wiz.focus].push(c),
+            KeyCode::Enter => {
+                let spec = wiz.spec();
+                if spec.name.is_empty() {
+                    wiz.error = Some("give the module a name".into());
+                    wiz.focus = 0;
+                } else if spec.exec.is_empty() {
+                    wiz.error = Some("what command should it run?".into());
+                    wiz.focus = 1;
+                } else {
+                    let lane = LANES[wiz.lane];
+                    match self.cfg.as_mut().unwrap().add_custom_module(&spec, lane) {
+                        Ok(_) => {
+                            self.dirty = true;
+                            self.wizard = None;
+                        }
+                        Err(e) => self.wizard.as_mut().unwrap().error = Some(friendly(&e)),
+                    }
+                }
             }
             _ => {}
         }
@@ -262,6 +360,50 @@ impl WaybarScreen {
         if let Some(sel) = self.picker {
             self.render_picker(f, area, skin, sel);
         }
+        if let Some(wiz) = &self.wizard {
+            self.render_wizard(f, area, skin, wiz);
+        }
+    }
+
+    fn render_wizard(&self, f: &mut Frame, area: Rect, skin: &Skin, wiz: &Wizard) {
+        let w = 60u16.min(area.width.saturating_sub(2));
+        let h = 15u16.min(area.height.saturating_sub(2));
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let rect = Rect::new(x, y, w, h);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(skin.accent_bold())
+            .title(format!(" New custom module → {} ", LANES[wiz.lane]));
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (i, label) in WIZARD_LABELS.iter().enumerate() {
+            let on = i == wiz.focus;
+            let marker = if on { "▸ " } else { "  " };
+            let val = &wiz.fields[i];
+            let shown = if on {
+                format!("{val}▏") // cursor caret
+            } else {
+                val.clone()
+            };
+            let label_style = if on { skin.accent_bold() } else { skin.dim() };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{marker}{label}: "), label_style),
+                Span::styled(shown, skin.body()),
+            ]));
+        }
+        lines.push(Line::from(""));
+        if let Some(err) = &wiz.error {
+            lines.push(Line::from(Span::styled(format!("  {err}"), skin.warn())));
+        }
+        lines.push(Line::from(Span::styled(
+            "  Tab next · Enter create · Esc cancel",
+            skin.dim(),
+        )));
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect, skin: &Skin) {

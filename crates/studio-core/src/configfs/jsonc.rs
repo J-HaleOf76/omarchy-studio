@@ -206,6 +206,73 @@ impl JsoncDoc {
         Ok(())
     }
 
+    /// Insert (or replace) a member `"key": value` in the object at `path`
+    /// (empty path = the root object). When the key already exists its value is
+    /// replaced in place; otherwise the member is appended after the last one,
+    /// matching its indentation. `raw_value` is literal JSON text — its own
+    /// newlines are re-indented to sit under the new member.
+    pub fn insert_member(&mut self, path: &str, key: &str, raw_value: &str) -> Result<(), String> {
+        enum Plan {
+            Replace((usize, usize)),
+            Append((usize, usize)),
+        }
+        let plan = {
+            let node = if path.is_empty() {
+                &self.root
+            } else {
+                self.resolve(path)
+                    .ok_or_else(|| format!("{path} not found"))?
+            };
+            let Node::Object { span, members } = node else {
+                return Err(format!("{path} is not an object"));
+            };
+            match members.iter().find(|m| m.key == key) {
+                Some(m) => Plan::Replace(m.value.span()),
+                None => Plan::Append(*span),
+            }
+        };
+        match plan {
+            Plan::Replace(vspan) => self.splice(vspan, raw_value),
+            Plan::Append(span) => {
+                let inner_span = (span.0 + 1, span.1 - 1);
+                let inner = self.src[inner_span.0..inner_span.1].to_string();
+                let mut chunks = split_top_level(&inner);
+                // Peel the trailing whitespace off the last member (the newline
+                // that sits before the closing brace) so it can follow the *new*
+                // member instead — keeping the `}` on its own line.
+                let mut trailing = String::new();
+                if let Some(last) = chunks.last_mut() {
+                    let keep = last.trim_end_matches([' ', '\t', '\r', '\n']).len();
+                    trailing = last[keep..].to_string();
+                    last.truncate(keep);
+                }
+                // Reuse the last member's leading whitespace as this one's indent
+                // (falling back to a two-space block for a one-line object).
+                let indent = chunks
+                    .last()
+                    .map(|c| {
+                        let ws: String = c
+                            .chars()
+                            .take_while(|ch| matches!(ch, '\n' | '\r' | ' ' | '\t'))
+                            .collect();
+                        if ws.contains('\n') {
+                            ws
+                        } else {
+                            "\n  ".to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "\n  ".to_string());
+                // Re-indent the value's continuation lines under the member.
+                let base: String = indent.chars().filter(|c| matches!(c, ' ' | '\t')).collect();
+                let value = raw_value.replace('\n', &format!("\n{base}"));
+                chunks.push(format!("{indent}\"{key}\": {value}{trailing}"));
+                let out = chunks.join(",");
+                self.splice(inner_span, &out);
+            }
+        }
+        Ok(())
+    }
+
     fn splice(&mut self, span: (usize, usize), replacement: &str) {
         let mut s = String::with_capacity(self.src.len());
         s.push_str(&self.src[..span.0]);
@@ -514,6 +581,32 @@ mod tests {
         // removing an absent module is a no-op
         doc.remove_item("modules-right", "\"nope\"").unwrap();
         assert_eq!(doc.array_items("modules-right").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn insert_member_appends_and_replaces() {
+        let mut doc = JsoncDoc::parse(SAMPLE).unwrap();
+        // append a new custom module object at the root
+        doc.insert_member(
+            "",
+            "custom/hello",
+            "{\n  \"exec\": \"echo hi\",\n  \"interval\": 5\n}",
+        )
+        .unwrap();
+        let out = doc.to_string();
+        assert!(out.contains("\"custom/hello\""));
+        assert!(out.contains("\"exec\": \"echo hi\""));
+        // untouched content survives, still parses, new member is reachable
+        assert!(out.contains("// top comment"));
+        let re = JsoncDoc::parse(&out).unwrap();
+        assert_eq!(re.get("custom/hello.interval").as_deref(), Some("5"));
+        assert_eq!(re.get("height").as_deref(), Some("26"));
+
+        // inserting the same key again replaces its value in place
+        let mut doc2 = JsoncDoc::parse(&out).unwrap();
+        doc2.insert_member("", "custom/hello", "42").unwrap();
+        assert_eq!(doc2.get("custom/hello").as_deref(), Some("42"));
+        assert!(doc2.to_string().contains("// top comment"));
     }
 
     #[test]
