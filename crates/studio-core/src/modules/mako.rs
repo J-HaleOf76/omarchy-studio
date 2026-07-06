@@ -646,7 +646,7 @@ mod tests {
     fn write_builtin(paths: &OmarchyPaths) {
         std::fs::write(
             builtin_tpl(paths),
-            "include=~/.local/share/omarchy/default/mako/core.ini\n\ntext-color={{ foreground }}\nborder-color={{ accent }}\nbackground-color={{ background }}\n",
+            "include=~/sys/omarchy/default/mako/core.ini\n\ntext-color={{ foreground }}\nborder-color={{ accent }}\nbackground-color={{ background }}\n",
         )
         .unwrap();
     }
@@ -663,7 +663,7 @@ mod tests {
 
         let out = std::fs::read_to_string(tpl_path(&paths)).unwrap();
         // 1. inherits upstream behaviour
-        assert!(out.contains("include=~/.local/share/omarchy/default/mako/core.ini"));
+        assert!(out.contains("include=~/sys/omarchy/default/mako/core.ini"));
         // 2. theme colour placeholders survive → theming still works
         assert!(out.contains("text-color={{ foreground }}"));
         assert!(out.contains("border-color={{ accent }}"));
