@@ -1,0 +1,39 @@
+# Maintainer: Ariz <arinopc22@gmail.com>
+pkgname=omarchy-studio
+pkgver=0.0.1
+pkgrel=1
+pkgdesc="One-stop theming cockpit for Omarchy — themes, keybinds, waybar, notifications, lock/idle (TUI + CLI)"
+arch=('x86_64')
+url="https://github.com/arino08/omarchy-studio"
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('cargo')
+# Runtime: expects an Omarchy install (omarchy-theme-set, omarchy-restart-*, hyprctl on PATH).
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('1c0ef845b43c559f0315904edad6b1a99a2bd7c8d91529bdba468f9372c8ae63')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo test --frozen --release --workspace
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -Dm0755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+    install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm0644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
