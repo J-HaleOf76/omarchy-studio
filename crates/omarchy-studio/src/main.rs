@@ -34,6 +34,8 @@ fn main() {
         ["waybar", rest @ ..] => waybar(rest),
         ["notif", rest @ ..] => notif(rest),
         ["osd", rest @ ..] => osd(rest),
+        ["idle", rest @ ..] => idle(rest),
+        ["lock", rest @ ..] => lock(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -974,6 +976,208 @@ fn osd(args: &[&str]) -> i32 {
         }
         Err(e) => {
             eprintln!("apply failed: {e:?}");
+            1
+        }
+    }
+}
+
+fn fmt_dur(secs: i64) -> String {
+    if secs >= 60 && secs % 60 == 0 {
+        format!("{}m", secs / 60)
+    } else if secs >= 60 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+fn idle(args: &[&str]) -> i32 {
+    use studio_core::modules::lockidle::{Hypridle, Stage};
+    let Some(paths) = omarchy() else { return 4 };
+    let mut idle = match Hypridle::load(&paths) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("can't read hypridle.conf: {e:?}");
+            return 1;
+        }
+    };
+    let stage_of = |name: &str| match name {
+        "screensaver" => Some(Stage::Screensaver),
+        "lock" => Some(Stage::Lock),
+        "screen-off" => Some(Stage::ScreenOff),
+        "suspend" => Some(Stage::Suspend),
+        _ => None,
+    };
+    let summary = match args {
+        ["timeline"] | ["list"] | [] => {
+            println!("idle timeline:");
+            for l in idle.timeline() {
+                println!("  {:>6}  {}", fmt_dur(l.timeout), l.stage.label());
+            }
+            return 0;
+        }
+        ["set", stage, secs] => {
+            let Some(want) = stage_of(stage) else {
+                eprintln!("stage must be screensaver|lock|screen-off|suspend");
+                return 2;
+            };
+            let Ok(seconds) = secs.parse::<i64>() else {
+                eprintln!("seconds must be a whole number");
+                return 2;
+            };
+            let Some(listener) = idle.timeline().into_iter().find(|l| l.stage == want) else {
+                eprintln!("no `{stage}` stage in your hypridle.conf");
+                return 1;
+            };
+            if let Err(e) = idle.set_timeout(&listener, seconds) {
+                eprintln!("{e:?}");
+                return 2;
+            }
+            format!("idle {stage} → {}", fmt_dur(seconds))
+        }
+        _ => {
+            eprintln!("usage: idle timeline | set <screensaver|lock|screen-off|suspend> <seconds>");
+            return 2;
+        }
+    };
+
+    let file = idle.path().to_path_buf();
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            std::slice::from_ref(&file),
+            "hypridle",
+            &[],
+        );
+    }
+    match idle.apply(&RealRunner) {
+        Ok(()) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    &summary,
+                    std::slice::from_ref(&file),
+                    "hypridle",
+                    &[],
+                );
+            }
+            println!("{summary} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("apply failed: {e:?}");
+            1
+        }
+    }
+}
+
+fn lock(args: &[&str]) -> i32 {
+    use studio_core::modules::lockidle::Hyprlock;
+    let Some(paths) = omarchy() else { return 4 };
+
+    if let ["avatar", "list"] = args {
+        let choices = Hyprlock::avatar_choices(&paths);
+        if choices.is_empty() {
+            println!("(no images in ~/.config/omarchy/profile_images/)");
+        }
+        for p in choices {
+            println!("{}", p.display());
+        }
+        return 0;
+    }
+    if let ["preview"] = args {
+        eprintln!("preview locks your screen — run `hyprlock` yourself when ready.");
+        return 0;
+    }
+
+    let mut lock = match Hyprlock::load(&paths) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("can't read hyprlock.conf: {e:?}");
+            return 1;
+        }
+    };
+    let summary = match args {
+        ["show"] | ["list"] | [] => {
+            let opt = |o: Option<String>| o.unwrap_or_else(|| "—".into());
+            println!("avatar   {}", opt(lock.avatar_path()));
+            println!("size     {}", opt(lock.avatar_size()));
+            println!("blur     {}", opt(lock.blur_passes()));
+            println!("dim      {}", opt(lock.dim()));
+            return 0;
+        }
+        ["avatar", path] => {
+            if !lock.set_avatar(path) {
+                eprintln!("no avatar image field in hyprlock.conf");
+                return 1;
+            }
+            format!("lock avatar → {path}")
+        }
+        ["size", px] => match px.parse::<i64>() {
+            Ok(n) if (32..=512).contains(&n) && lock.set_avatar_size(n) => {
+                format!("lock avatar size → {n}")
+            }
+            _ => {
+                eprintln!("size must be 32–512");
+                return 2;
+            }
+        },
+        ["blur", n] => match n.parse::<i64>() {
+            Ok(v) if (0..=10).contains(&v) && lock.set_blur_passes(v) => format!("lock blur → {v}"),
+            _ => {
+                eprintln!("blur must be 0–10");
+                return 2;
+            }
+        },
+        ["dim", v] => match v.parse::<f64>() {
+            Ok(f) if (0.0..=1.0).contains(&f) && lock.set_dim(f) => {
+                format!("lock dim → {f:.2}")
+            }
+            _ => {
+                eprintln!("dim must be between 0.0 and 1.0");
+                return 2;
+            }
+        },
+        _ => {
+            eprintln!(
+                "usage: lock show | avatar <path> | avatar list | size <px> | blur <n> | dim <0..1> | preview"
+            );
+            return 2;
+        }
+    };
+
+    let file = lock.path().to_path_buf();
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            std::slice::from_ref(&file),
+            "hyprlock",
+            &[],
+        );
+    }
+    match lock.save() {
+        Ok(backup) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    &summary,
+                    std::slice::from_ref(&file),
+                    "hyprlock",
+                    &[],
+                );
+            }
+            if let Some(dir) = backup {
+                println!("(backed up your original lock screen to {})", dir.display());
+            }
+            println!("{summary} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("save failed: {e:?}");
             1
         }
     }

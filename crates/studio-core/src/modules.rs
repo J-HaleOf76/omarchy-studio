@@ -16,6 +16,7 @@ pub mod animations;
 pub mod color;
 pub mod dispatchers;
 pub mod keybinds;
+pub mod lockidle;
 pub mod looknfeel;
 pub mod mako;
 pub mod swayosd;
