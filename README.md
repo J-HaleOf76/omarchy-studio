@@ -2,7 +2,7 @@
 
 **The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
-> **Status: alpha.** The modules below are built, tested (128 tests green), and drive the real Omarchy config on disk. Wallpapers, palette extraction, the doctor, and update-survival hooks are still on the roadmap. Tested against Omarchy 3.8.
+> **Status: alpha.** The modules below are built, tested (134 tests green), and drive the real Omarchy config on disk. Wallpapers and the palette-extraction lab are next on the roadmap. Tested against Omarchy 3.8.
 
 ## Why
 
@@ -20,6 +20,8 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Notifications (mako)** | Behavior schema (timeouts, layout, urgency rules), do-not-disturb, live sample notifications | v0.5 |
 | **OSD (swayosd)** | Volume/brightness popup geometry, percentage, margins, self-test | v0.5 |
 | **Lock & Idle** | Retime the hypridle timeline (screensaver → lock → screen-off → suspend), hyprlock avatar/blur/dim | v0.5 |
+| **Update survival** | Lifecycle hooks (`theme-set`, `post-update`) re-assert Studio's style blocks after theme changes and flag drift/clobbers after `omarchy-update` | v0.5 |
+| **Doctor** | One health view: system facts, capability probes, hook status, drift report — in the TUI and the CLI | v0.5 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
 
@@ -41,6 +43,12 @@ Optional — add Studio to the Omarchy menu as a floating terminal app:
 omarchy-studio install-integration    # undo with: omarchy-studio uninstall
 ```
 
+Recommended — install the update-survival hooks so Studio's changes live through theme switches and `omarchy-update`:
+
+```bash
+omarchy-studio hooks install          # undo with: omarchy-studio hooks remove
+```
+
 ## Quick start — the TUI
 
 ```bash
@@ -57,7 +65,7 @@ omarchy-studio          # launch the full-screen cockpit
 | `s` | save pending edits (snapshotted first) |
 | `/` | search · `?` help · `q` quit |
 
-Studio themes itself from your active Omarchy theme, so it always matches your desktop. Screens for not-yet-built modules (Wallpaper, Doctor) show an honest "arriving in …" placeholder rather than a broken UI.
+Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. Screens for not-yet-built modules (Wallpaper, Snapshots browser) show an honest "arriving in …" placeholder rather than a broken UI.
 
 ## CLI reference
 
@@ -104,8 +112,11 @@ omarchy-studio idle timeline
 omarchy-studio idle set <screensaver|lock|screen-off|suspend> <seconds>
 omarchy-studio lock show | avatar <path> | avatar list | size <px> | blur <n> | dim <0..1> | preview
 
-# Health check
-omarchy-studio doctor [--deps]
+# Update-survival hooks
+omarchy-studio hooks install | remove | status
+
+# Health check (--quiet: terse drift report, exit 1 when something needs a look)
+omarchy-studio doctor [--deps] [--quiet]
 ```
 
 ## Design pillars
