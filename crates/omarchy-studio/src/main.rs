@@ -24,7 +24,9 @@ fn main() {
             );
             0
         }
-        ["doctor", rest @ ..] => doctor(rest.contains(&"--deps")),
+        ["doctor", rest @ ..] => doctor(rest.contains(&"--deps"), rest.contains(&"--quiet")),
+        ["hooks", rest @ ..] => hooks_cmd(rest),
+        ["hook", rest @ ..] => hook_event(rest),
         ["theme", rest @ ..] => theme(rest),
         ["snapshot", rest @ ..] => snapshot(rest),
         ["looknfeel", rest @ ..] => looknfeel(rest),
@@ -69,8 +71,26 @@ fn history() -> Result<SnapshotStore, i32> {
 
 // ── doctor ──────────────────────────────────────────────────────────────────
 
-fn doctor(with_deps: bool) -> i32 {
+fn doctor(with_deps: bool, quiet: bool) -> i32 {
     let Some(paths) = omarchy() else { return 4 };
+
+    // --quiet: machine mode for the post-update hook — nothing on a clean
+    // system, terse drift lines + exit 1 when something needs a look.
+    if quiet {
+        let Ok(store) = history() else { return 1 };
+        let report = studio_core::hooks::update_report(&store);
+        if report.clean() {
+            return 0;
+        }
+        for f in &report.drift {
+            println!("drift {}", f.display());
+        }
+        for f in &report.clobbers {
+            println!("clobber {}", f.display());
+        }
+        return 1;
+    }
+
     let caps = Capabilities::probe(&paths, &RealRunner);
     let theme = paths
         .current_theme_name()
@@ -119,6 +139,40 @@ fn doctor(with_deps: bool) -> i32 {
         println!("  ⚠ your Omarchy checkout has local modifications.");
         println!("    These will conflict when `omarchy-update` pulls. Consider moving");
         println!("    patches into ~/.config/omarchy/ override surfaces (hooks, themed/).");
+    }
+
+    println!("  update survival");
+    for (event, state) in studio_core::hooks::status(&paths) {
+        let word = match state {
+            studio_core::hooks::HookState::Installed => "installed",
+            studio_core::hooks::HookState::Missing => {
+                "not installed (omarchy-studio hooks install)"
+            }
+            studio_core::hooks::HookState::Modified => {
+                "MODIFIED — not our script (hooks install repairs)"
+            }
+        };
+        println!("    {:<18} hook  {}", event, word);
+    }
+    if let Ok(store) = history() {
+        let report = studio_core::hooks::update_report(&store);
+        if report.clean() {
+            println!("    tracked files      all match the last snapshot");
+        } else {
+            for f in &report.drift {
+                println!(
+                    "    drifted            {} (hand-edited since our snapshot)",
+                    f.display()
+                );
+            }
+            for f in &report.clobbers {
+                println!(
+                    "    clobbered          {} (an update left a newer .bak sibling)",
+                    f.display()
+                );
+            }
+            println!("    review with `omarchy-studio snapshot list`, restore with `snapshot restore <id>`");
+        }
     }
 
     if with_deps {
@@ -1239,6 +1293,112 @@ fn toggle(args: &[&str]) -> i32 {
     }
 }
 
+// ── update-survival hooks (spec 02 §4, §6) ──────────────────────────────────
+
+fn hooks_cmd(args: &[&str]) -> i32 {
+    use studio_core::hooks;
+    let Some(paths) = omarchy() else { return 4 };
+    let state = studio_core::studio_state_dir();
+    match args {
+        ["install"] => match hooks::install(&paths, &state) {
+            Ok(written) => {
+                for p in &written {
+                    println!("installed {}", p.display());
+                }
+                println!("Studio now survives theme changes and omarchy-update.");
+                0
+            }
+            Err(e) => {
+                eprintln!("hook install failed: {e:?}");
+                1
+            }
+        },
+        ["remove"] => match hooks::uninstall(&paths, &state) {
+            Ok(removed) if removed.is_empty() => {
+                println!("no Studio hooks were installed.");
+                0
+            }
+            Ok(removed) => {
+                for p in &removed {
+                    println!("removed {}", p.display());
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("hook removal failed: {e:?}");
+                1
+            }
+        },
+        ["status"] => {
+            for (event, state) in hooks::status(&paths) {
+                let word = match state {
+                    hooks::HookState::Installed => "installed",
+                    hooks::HookState::Missing => "missing",
+                    hooks::HookState::Modified => "MODIFIED (not our script)",
+                };
+                println!("{event:<14} {word}");
+            }
+            0
+        }
+        _ => {
+            eprintln!("usage: hooks install | remove | status");
+            2
+        }
+    }
+}
+
+/// Plumbing verbs the installed hook scripts call. Quiet and forgiving by
+/// design: they run unattended inside Omarchy's own flows.
+fn hook_event(args: &[&str]) -> i32 {
+    use studio_core::hooks;
+    let Some(paths) = omarchy() else { return 4 };
+    let Ok(store) = history() else { return 1 };
+    match args.first() {
+        // After a theme apply: put back any managed style block the theme
+        // refresh dropped, then restart the affected components.
+        Some(&"theme-set") => {
+            let repaired = match hooks::reassert_blocks(&paths, &store) {
+                Ok(r) => r,
+                Err(_) => return 1,
+            };
+            for file in &repaired {
+                let _ = store.record(
+                    SnapshotKind::Post,
+                    "hook: re-asserted managed block",
+                    std::slice::from_ref(file),
+                    "hooks",
+                    &[],
+                );
+                let name = file.to_string_lossy();
+                let component = if name.contains("waybar") {
+                    studio_core::omarchy::Component::Waybar
+                } else {
+                    studio_core::omarchy::Component::Swayosd
+                };
+                let _ = RealRunner.run(&cmds::restart(component));
+            }
+            0
+        }
+        // After omarchy-update: check for drift/clobbers and notify the
+        // desktop when something needs a look. Exit 0 either way.
+        Some(&"post-update") => {
+            let report = hooks::update_report(&store);
+            if !report.clean() {
+                let _ = RealRunner.run(&cmds::notify_send(
+                    "normal",
+                    "Omarchy Studio",
+                    &report.summary(),
+                ));
+            }
+            0
+        }
+        _ => {
+            eprintln!("usage: hook theme-set | post-update  (called by installed hooks)");
+            2
+        }
+    }
+}
+
 // ── menu integration ─────────────────────────────────────────────────────────
 
 fn install_integration() -> i32 {
@@ -1280,8 +1440,19 @@ fn install_integration() -> i32 {
 
 fn uninstall() -> i32 {
     let Some(paths) = omarchy() else { return 4 };
+
+    // Hooks first — they reference the binary that's about to go away.
+    match studio_core::hooks::uninstall(&paths, &studio_core::studio_state_dir()) {
+        Ok(removed) => {
+            for p in removed {
+                println!("removed {}", p.display());
+            }
+        }
+        Err(e) => eprintln!("hook removal failed (continuing): {e:?}"),
+    }
+
     if !studio_core::integration::is_installed(&paths) {
-        println!("Studio was not installed in the Omarchy menu; nothing to remove.");
+        println!("Studio was not installed in the Omarchy menu; nothing else to remove.");
         return 0;
     }
     let store = history().ok();

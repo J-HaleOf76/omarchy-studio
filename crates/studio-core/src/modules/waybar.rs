@@ -377,7 +377,7 @@ pub struct WaybarStyle {
     pub radius: Option<u32>,
 }
 
-fn style_path(paths: &OmarchyPaths) -> PathBuf {
+pub(crate) fn style_path(paths: &OmarchyPaths) -> PathBuf {
     paths
         .config
         .parent()
@@ -385,7 +385,7 @@ fn style_path(paths: &OmarchyPaths) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("waybar/style.css"))
 }
 
-fn style_block() -> ManagedBlock {
+pub(crate) fn style_block() -> ManagedBlock {
     ManagedBlock::new("waybar-style", CommentStyle::CBlock)
 }
 

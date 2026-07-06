@@ -31,11 +31,11 @@ fn config_toml(paths: &OmarchyPaths) -> PathBuf {
     config_dir(paths).join("config.toml")
 }
 
-fn style_css(paths: &OmarchyPaths) -> PathBuf {
+pub(crate) fn style_css(paths: &OmarchyPaths) -> PathBuf {
     config_dir(paths).join("style.css")
 }
 
-fn style_block() -> ManagedBlock {
+pub(crate) fn style_block() -> ManagedBlock {
     ManagedBlock::new("swayosd-style", CommentStyle::CBlock)
 }
 

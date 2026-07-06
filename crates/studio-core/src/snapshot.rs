@@ -153,6 +153,34 @@ impl SnapshotStore {
             .collect()
     }
 
+    /// The content of `f` as of our last snapshot (the mirror copy), if the
+    /// store has ever tracked it. This is what hook re-assertion reads.
+    pub fn last_content(&self, f: &Path) -> Option<String> {
+        std::fs::read_to_string(self.mirror_path(f)).ok()
+    }
+
+    /// When we last snapshotted `f` (the mirror's mtime), if tracked.
+    pub fn last_snapshot_time(&self, f: &Path) -> Option<std::time::SystemTime> {
+        std::fs::metadata(self.mirror_path(f))
+            .and_then(|m| m.modified())
+            .ok()
+    }
+
+    /// Every file the store has ever tracked, per its manifest.
+    pub fn tracked_files(&self) -> Vec<PathBuf> {
+        let Ok(content) = std::fs::read_to_string(self.root.join("manifest.toml")) else {
+            return Vec::new();
+        };
+        content
+            .lines()
+            .filter_map(|l| {
+                let (k, _) = l.split_once('=')?;
+                let k = k.trim().trim_matches('"');
+                k.starts_with('/').then(|| PathBuf::from(k))
+            })
+            .collect()
+    }
+
     /// Write back the full tracked state as of `id`; the restore itself is
     /// recorded as a new snapshot. Returns the restored file paths.
     pub fn restore(&self, id: &str) -> Result<Vec<PathBuf>> {

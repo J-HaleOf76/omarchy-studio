@@ -11,6 +11,8 @@
 //! - [`snapshot`] — git-backed history, undo/restore (spec 03 §6)
 //! - [`deps`]     — dependency & tool registry, guided-install guidance (spec 06)
 //! - [`integration`] — omarchy menu install/uninstall (spec 02 §3)
+//! - [`hooks`]    — theme-set/post-update hooks, update-survival flows (spec 02 §4, §6)
+//! - [`manifest`] — registry of artifacts Studio installed (spec 02 §6.2)
 //! - [`modules`]  — domain logic per PRD module (specs 04–05)
 
 pub mod cmd;
@@ -18,7 +20,9 @@ pub mod configfs;
 pub mod deps;
 pub mod engine;
 pub mod error;
+pub mod hooks;
 pub mod integration;
+pub mod manifest;
 pub mod modules;
 pub mod omarchy;
 pub mod snapshot;
