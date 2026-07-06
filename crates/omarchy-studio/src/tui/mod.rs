@@ -7,6 +7,7 @@
 //! end-to-end without pretending features exist.
 
 mod chord;
+mod logo;
 mod theme;
 mod screens {
     pub mod animations;
@@ -21,8 +22,11 @@ mod screens {
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap,
+};
 use ratatui::Frame;
 
 use studio_core::cmd::{CommandRunner, RealRunner};
@@ -84,6 +88,20 @@ impl Screen {
             Screen::Integrations => "Integrations",
             Screen::Doctor => "Doctor",
         }
+    }
+
+    /// Whether the screen has a real UI yet (false ⇒ honest placeholder).
+    fn built(self) -> bool {
+        matches!(
+            self,
+            Screen::Themes
+                | Screen::Keybinds
+                | Screen::LookFeel
+                | Screen::Animations
+                | Screen::Waybar
+                | Screen::Notifications
+                | Screen::LockIdle
+        )
     }
 
     /// Roadmap milestone a not-yet-built screen is coming in (spec honesty).
@@ -909,23 +927,17 @@ impl App {
     }
 
     fn draw(&mut self, f: &mut Frame) {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(16), Constraint::Min(20)])
-            .split(f.area());
-        self.draw_rail(f, cols[0]);
-
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
-            .split(cols[1]);
-        self.draw_header(f, rows[0]);
-        self.draw_content(f, rows[1]);
-        self.draw_keybar(f, rows[2]);
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(f.area());
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(20), Constraint::Min(20)])
+            .split(rows[0]);
+        self.draw_rail(f, cols[0]);
+        self.draw_panel(f, cols[1]);
+        self.draw_keybar(f, rows[1]);
 
         if self.help {
             self.draw_help(f);
@@ -940,6 +952,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, s)| {
+                let selected = *s == self.screen;
                 let key = if i < 9 {
                     format!("{} ", i + 1)
                 } else if i == 9 {
@@ -947,62 +960,115 @@ impl App {
                 } else {
                     "  ".to_string()
                 };
-                let style = if *s == self.screen {
-                    self.skin.selection()
+                let marker =
+                    Span::styled(if selected { "▌" } else { " " }, self.skin.accent_bold());
+                let key_style = if selected {
+                    self.skin.accent_bold()
                 } else {
-                    self.skin.body()
+                    self.skin.dim()
                 };
-                ListItem::new(Line::from(vec![
-                    Span::styled(key, self.skin.dim()),
-                    Span::styled(s.label(), style),
-                ]))
+                let label_style = if selected {
+                    self.skin.accent_bold()
+                } else if s.built() {
+                    self.skin.body()
+                } else {
+                    self.skin.dim()
+                };
+                let row = Line::from(vec![
+                    marker,
+                    Span::styled(key, key_style),
+                    Span::styled(format!("{:<15}", s.label()), label_style),
+                ]);
+                let item = ListItem::new(row);
+                if selected {
+                    item.style(ratatui::style::Style::default().bg(self.skin.sel_bg))
+                } else {
+                    item
+                }
             })
             .collect();
         let block = Block::default()
-            .borders(Borders::RIGHT)
-            .border_style(self.skin.border());
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.skin.border())
+            .title(Line::from(vec![
+                Span::styled(" ✦ ", self.skin.accent_bold()),
+                Span::styled("Studio ", self.skin.body()),
+            ]))
+            .title_bottom(
+                Line::from(Span::styled(
+                    concat!(" v", env!("CARGO_PKG_VERSION"), " "),
+                    self.skin.dim(),
+                ))
+                .right_aligned(),
+            );
         f.render_widget(List::new(items).block(block), area);
     }
 
-    fn draw_header(&self, f: &mut Frame, area: Rect) {
+    /// The main pane: a rounded panel whose border carries the screen title
+    /// (left) and the active theme (right); the screen renders inside.
+    fn draw_panel(&mut self, f: &mut Frame, area: Rect) {
+        let title = match &self.editor {
+            Some((ed, _)) => format!(" Palette · {} ", ed.pretty),
+            None => format!(" {} ", self.screen.label()),
+        };
         let current = self.paths.current_theme_name().unwrap_or_default();
-        let line = Line::from(vec![
-            Span::styled(" Omarchy Studio ", self.skin.accent_bold()),
-            Span::styled(format!("· {}", self.screen.label()), self.skin.body()),
-            Span::styled(format!("    {current}"), self.skin.dim()),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.skin.border())
+            .title(Line::from(Span::styled(title, self.skin.accent_bold())))
+            .title_top(
+                Line::from(Span::styled(format!(" {current} "), self.skin.dim())).right_aligned(),
+            )
+            .padding(Padding::horizontal(1));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        self.draw_content(f, inner);
     }
 
     fn draw_content(&mut self, f: &mut Frame, area: Rect) {
-        let pad = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area)[1];
         if let Some((ed, _)) = &self.editor {
-            ed.render(f, pad, &self.skin);
+            ed.render(f, area, &self.skin);
+            return;
+        }
+        // The home screen gets the wordmark banner when there's room for it.
+        if self.screen == Screen::Themes
+            && area.height >= logo::HEIGHT + 15
+            && area.width >= logo::WIDTH
+        {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(logo::HEIGHT), Constraint::Min(1)])
+                .split(area);
+            logo::render(f, rows[0], &self.skin);
+            self.themes.render(f, rows[1], &self.skin);
             return;
         }
         match self.screen {
-            Screen::Themes => self.themes.render(f, pad, &self.skin),
-            Screen::Keybinds => self.keybinds.render(f, pad, &self.skin),
-            Screen::LookFeel => self.looknfeel.render(f, pad, &self.skin),
-            Screen::Animations => self.animations.render(f, pad, &self.skin),
-            Screen::Waybar => self.waybar.render(f, pad, &self.skin),
-            Screen::Notifications => self.notifications.render(f, pad, &self.skin),
-            Screen::LockIdle => self.lockidle.render(f, pad, &self.skin),
-            other => self.draw_placeholder(f, pad, other),
+            Screen::Themes => self.themes.render(f, area, &self.skin),
+            Screen::Keybinds => self.keybinds.render(f, area, &self.skin),
+            Screen::LookFeel => self.looknfeel.render(f, area, &self.skin),
+            Screen::Animations => self.animations.render(f, area, &self.skin),
+            Screen::Waybar => self.waybar.render(f, area, &self.skin),
+            Screen::Notifications => self.notifications.render(f, area, &self.skin),
+            Screen::LockIdle => self.lockidle.render(f, area, &self.skin),
+            other => self.draw_placeholder(f, area, other),
         }
     }
 
     fn draw_placeholder(&self, f: &mut Frame, area: Rect, s: Screen) {
         let text = vec![
-            Line::from(Span::styled(s.label(), self.skin.accent_bold())),
             Line::from(""),
-            Line::from(Span::styled(
-                format!("This screen arrives in {}.", s.arriving()),
-                self.skin.body(),
-            )),
+            Line::from(vec![
+                Span::styled("◌ ", self.skin.dim()),
+                Span::styled(s.label(), self.skin.accent_bold()),
+                Span::styled(
+                    format!("  · arriving in {}", s.arriving()),
+                    self.skin.warn(),
+                ),
+            ]),
+            Line::from(""),
             Line::from(Span::styled(
                 "The engine underneath (config parsing, apply pipeline, snapshots,",
                 self.skin.dim(),
@@ -1015,15 +1081,20 @@ impl App {
         f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
     }
 
+    /// Bottom bar: toast when present, else `key label │ key label` hints with
+    /// the global chords right-aligned — the lazygit-style status strip.
     fn draw_keybar(&self, f: &mut Frame, area: Rect) {
         if let Some(t) = &self.toast {
-            let style = if t.ok {
-                self.skin.ok()
+            let (icon, style) = if t.ok {
+                ("✓", self.skin.ok())
             } else {
-                self.skin.error()
+                ("✗", self.skin.error())
             };
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(&t.text, style))),
+                Paragraph::new(Line::from(vec![
+                    Span::styled(format!(" {icon} "), style.add_modifier(Modifier::BOLD)),
+                    Span::styled(t.text.clone(), style),
+                ])),
                 area,
             );
             return;
@@ -1035,23 +1106,56 @@ impl App {
                 _ => ("tab/1-0 switch".into(), true),
             },
         };
-        let mut spans = vec![Span::styled(hint, self.skin.dim())];
+        let mut spans: Vec<Span> = vec![Span::raw(" ")];
+        let mut used = 1usize;
+        for (i, seg) in hint.split('·').map(str::trim).enumerate() {
+            if seg.is_empty() {
+                continue;
+            }
+            if i > 0 {
+                spans.push(Span::styled(" │ ", self.skin.border()));
+                used += 3;
+            }
+            let (key, label) = seg.split_once(' ').unwrap_or((seg, ""));
+            spans.push(Span::styled(key.to_string(), self.skin.accent_bold()));
+            used += key.chars().count();
+            if !label.is_empty() {
+                spans.push(Span::styled(format!(" {label}"), self.skin.dim()));
+                used += label.chars().count() + 1;
+            }
+        }
         if show_globals {
-            spans.push(Span::styled(
-                "   / search · ? help · q quit",
-                self.skin.border(),
-            ));
+            let globals: [(&str, &str); 3] = [("/", "search"), ("?", "help"), ("q", "quit")];
+            let right_len: usize = globals
+                .iter()
+                .map(|(k, l)| k.len() + l.len() + 3)
+                .sum::<usize>()
+                + 1;
+            let pad = (area.width as usize).saturating_sub(used + right_len);
+            spans.push(Span::raw(" ".repeat(pad)));
+            for (k, l) in globals {
+                spans.push(Span::styled(format!(" {k}"), self.skin.accent_bold()));
+                spans.push(Span::styled(format!(" {l} "), self.skin.dim()));
+            }
         }
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn draw_help(&self, f: &mut Frame) {
-        let area = centered(f.area(), 52, 14);
+        let area = centered(f.area(), 60, 13);
         f.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(self.skin.accent_bold())
-            .title(" keys ");
+            .title(Line::from(vec![
+                Span::styled(" ? ", self.skin.accent_bold()),
+                Span::styled("Help ", self.skin.body()),
+            ]))
+            .title_bottom(
+                Line::from(Span::styled(" any key to close ", self.skin.dim())).right_aligned(),
+            )
+            .padding(Padding::new(1, 1, 1, 0));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let rows = [
@@ -1157,35 +1261,60 @@ impl CommandPalette {
     fn render(&self, f: &mut Frame, skin: &Skin) {
         let area = centered(f.area(), 56, 16);
         f.render_widget(Clear, area);
+        let matches = self.matches();
+        let count = format!(
+            " {}/{} ",
+            (self.selected + 1).min(matches.len()),
+            matches.len()
+        );
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(skin.accent_bold())
-            .title(" search — type, ↑↓ to move, enter ");
+            .title(Line::from(vec![
+                Span::styled(" / ", skin.accent_bold()),
+                Span::styled("Search ", skin.body()),
+            ]))
+            .title_bottom(Line::from(Span::styled(count, skin.dim())).right_aligned())
+            .padding(Padding::horizontal(1));
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
             .split(inner);
         f.render_widget(
-            Paragraph::new(format!("› {}▏", self.query)).style(skin.body()),
+            Paragraph::new(Line::from(vec![
+                Span::styled("❯ ", skin.accent_bold()),
+                Span::styled(self.query.clone(), skin.body()),
+                Span::styled("▏", skin.accent_bold()),
+            ])),
             rows[0],
         );
-        let items: Vec<ListItem> = self
-            .matches()
+        let items: Vec<ListItem> = matches
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                let style = if i == self.selected {
-                    skin.selection()
+                let on = i == self.selected;
+                let marker = Span::styled(if on { "▌" } else { " " }, skin.accent_bold());
+                let label = Span::styled(
+                    format!(" {}", e.label),
+                    if on { skin.selection() } else { skin.body() },
+                );
+                let item = ListItem::new(Line::from(vec![marker, label]));
+                if on {
+                    item.style(ratatui::style::Style::default().bg(skin.sel_bg))
                 } else {
-                    skin.body()
-                };
-                ListItem::new(Span::styled(e.label.clone(), style))
+                    item
+                }
             })
             .collect();
-        f.render_widget(List::new(items), rows[1]);
+        f.render_widget(List::new(items), rows[2]);
     }
 }
 
