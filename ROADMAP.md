@@ -46,7 +46,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.4.3 Waybar screen: three-lane layout with human module labels, J/K move in lane, H/L move across lanes, a=add (catalog picker), d=remove, s=apply (restart Waybar, snapshot-backed) [07 §4]
 - [x] 0.4.4 style.css geometry: managed CSS block (font-size, corner radius) appended after the theme  so it wins; CLI waybar style show/font-size/radius/reset [03 §4]
 - [x] 0.4.5 custom-module wizard: JsoncDoc::insert_member + WaybarConfig::add_custom_module scaffold a custom/* config object + lane entry from a plain spec (name/exec/interval/format/on-click); TUI form (a → Custom command) + CLI waybar new [05 §4]
-- [ ] 0.4.6 Crash watchdog apply flow [05 §4]
+- [x] 0.4.6 crash watchdog: apply_watched saves+restarts then confirms Waybar stayed up (settle delay); auto-reverts the previous config if the edit killed the bar; only arms when Waybar was confirmed running first (no false reverts). Wired into TUI + CLI apply [05 §4]
 - [x] 0.4.7 CLI waybar modules/add/remove/move/set (snapshot-backed, restarts Waybar) [08]
 
 ## v0.5 — Notifications, OSD, Lock/Idle (~2 wks) — *exit: mako behavior survives theme switch + omarchy-update*

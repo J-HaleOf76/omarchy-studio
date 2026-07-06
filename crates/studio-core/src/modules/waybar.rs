@@ -250,6 +250,62 @@ impl WaybarConfig {
         }
         Ok(())
     }
+
+    /// Apply with a crash watchdog (roadmap 0.4.6): save + restart, then confirm
+    /// Waybar stayed up. If it was running before and is gone `settle` after the
+    /// restart, the previous config is written back and Waybar restarted again —
+    /// so a bad edit can never leave the user bar-less.
+    ///
+    /// The safety net only arms when Waybar was confirmed running beforehand: if
+    /// we can't even check (no `pgrep`, headless session), we apply without
+    /// reverting rather than risk clobbering a good change on a false negative.
+    pub fn apply_watched(
+        &self,
+        runner: &dyn crate::cmd::CommandRunner,
+        settle: std::time::Duration,
+    ) -> Result<ApplyOutcome> {
+        let was_alive = waybar_alive(runner);
+        let original = std::fs::read_to_string(&self.path).ok();
+        self.apply(runner)?;
+        if !was_alive {
+            return Ok(ApplyOutcome::AppliedUnwatched);
+        }
+        if !settle.is_zero() {
+            std::thread::sleep(settle);
+        }
+        if waybar_alive(runner) {
+            return Ok(ApplyOutcome::Applied);
+        }
+        // Waybar died on the new config — restore the previous one and revive it.
+        if let Some(orig) = original {
+            crate::configfs::atomic_write(&self.path, &orig)?;
+            let _ = runner.run(&crate::omarchy::cmds::restart(Component::Waybar));
+        }
+        Ok(ApplyOutcome::Reverted)
+    }
+}
+
+/// Result of a watched apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyOutcome {
+    /// The change was applied and Waybar is still running.
+    Applied,
+    /// Applied, but Waybar wasn't running beforehand so the watchdog stood down.
+    AppliedUnwatched,
+    /// The change stopped Waybar; the previous config was restored and the bar
+    /// brought back.
+    Reverted,
+}
+
+/// Whether a process named `waybar` is currently running. A failure to check
+/// (missing `pgrep`, etc.) reads as "not running" — callers pair this with a
+/// pre-apply check so an unknowable state disarms the watchdog rather than
+/// triggering a revert.
+fn waybar_alive(runner: &dyn crate::cmd::CommandRunner) -> bool {
+    runner
+        .run(&crate::omarchy::cmds::process_alive("waybar"))
+        .map(|o| o.ok())
+        .unwrap_or(false)
 }
 
 fn edit_err(e: String) -> StudioError {
@@ -535,6 +591,89 @@ mod tests {
         assert!(on_disk.contains("\"on-click\""));
         // the original module survived
         assert_eq!(re.lane("modules-left"), vec!["clock"]);
+    }
+
+    #[test]
+    fn watchdog_reverts_when_waybar_dies_and_leaves_good_edits_alone() {
+        use crate::cmd::{CmdOutput, StubRunner};
+        use std::time::Duration;
+
+        let paths = fake_paths("watch");
+        let good = "{\n  \"modules-left\": [\"clock\"],\n  \"modules-center\": [],\n  \"modules-right\": []\n}\n";
+        std::fs::write(config_path(&paths), good).unwrap();
+
+        let restart = crate::omarchy::cmds::restart(Component::Waybar).display();
+        let alive = crate::omarchy::cmds::process_alive("waybar").display();
+        let dead = CmdOutput {
+            status: 1,
+            ..Default::default()
+        };
+        let up = CmdOutput {
+            status: 0,
+            ..Default::default()
+        };
+
+        // Case 1: Waybar alive before, alive after → Applied, edit persists.
+        let mut wb = WaybarConfig::load(&paths).unwrap();
+        wb.add("modules-center", "cpu").unwrap();
+        let runner = StubRunner::default()
+            .with(&alive, up.clone())
+            .with(&restart, up.clone());
+        assert_eq!(
+            wb.apply_watched(&runner, Duration::ZERO).unwrap(),
+            ApplyOutcome::Applied
+        );
+        assert!(std::fs::read_to_string(config_path(&paths))
+            .unwrap()
+            .contains("cpu"));
+
+        // Case 2: Waybar alive before, gone after → Reverted, disk back to good.
+        let mut wb = WaybarConfig::load(&paths).unwrap();
+        let before = std::fs::read_to_string(config_path(&paths)).unwrap();
+        wb.add("modules-right", "battery").unwrap();
+        // first `pgrep` (before) = up, restart ok, second `pgrep` (after) = dead
+        let runner = Recorder::new(vec![up.clone(), up.clone(), dead.clone()]);
+        assert_eq!(
+            wb.apply_watched(&runner, Duration::ZERO).unwrap(),
+            ApplyOutcome::Reverted
+        );
+        assert_eq!(
+            std::fs::read_to_string(config_path(&paths)).unwrap(),
+            before,
+            "a bar-killing edit must be rolled back"
+        );
+
+        // Case 3: Waybar not running beforehand → AppliedUnwatched (no revert).
+        let mut wb = WaybarConfig::load(&paths).unwrap();
+        wb.add("modules-center", "memory").unwrap();
+        let runner = StubRunner::default()
+            .with(&alive, dead.clone())
+            .with(&restart, up.clone());
+        assert_eq!(
+            wb.apply_watched(&runner, Duration::ZERO).unwrap(),
+            ApplyOutcome::AppliedUnwatched
+        );
+        assert!(std::fs::read_to_string(config_path(&paths))
+            .unwrap()
+            .contains("memory"));
+    }
+
+    /// A runner that returns scripted outputs in call order (so the same command
+    /// — `pgrep` — can answer differently before vs after the restart).
+    struct Recorder {
+        outs: std::sync::Mutex<std::collections::VecDeque<crate::cmd::CmdOutput>>,
+    }
+    impl Recorder {
+        fn new(outs: Vec<crate::cmd::CmdOutput>) -> Self {
+            Self {
+                outs: std::sync::Mutex::new(outs.into()),
+            }
+        }
+    }
+    impl crate::cmd::CommandRunner for Recorder {
+        fn run(&self, _cmd: &crate::cmd::Cmd) -> Result<crate::cmd::CmdOutput> {
+            Ok(self.outs.lock().unwrap().pop_front().unwrap_or_default())
+        }
     }
 
     #[test]

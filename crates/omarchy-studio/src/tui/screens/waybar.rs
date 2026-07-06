@@ -287,11 +287,17 @@ impl WaybarScreen {
         WaybarAction::None
     }
 
-    // IO delegated from the App.
-    pub fn commit(&self, runner: &dyn CommandRunner) -> studio_core::error::Result<()> {
+    // IO delegated from the App. Applies with the crash watchdog: if the edit
+    // stops Waybar, the previous config is restored automatically.
+    pub fn commit(
+        &self,
+        runner: &dyn CommandRunner,
+    ) -> studio_core::error::Result<studio_core::modules::waybar::ApplyOutcome> {
+        use studio_core::modules::waybar::ApplyOutcome;
         match &self.cfg {
-            Some(c) => c.apply(runner),
-            None => Ok(()),
+            // Give Waybar a moment to come up (or crash) before checking.
+            Some(c) => c.apply_watched(runner, std::time::Duration::from_millis(900)),
+            None => Ok(ApplyOutcome::Applied),
         }
     }
 

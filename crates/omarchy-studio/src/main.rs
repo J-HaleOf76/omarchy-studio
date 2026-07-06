@@ -598,8 +598,13 @@ fn waybar(args: &[&str]) -> i32 {
                 &[],
             );
         }
-        match cfg.apply(&RealRunner) {
-            Ok(()) => {
+        use studio_core::modules::waybar::ApplyOutcome;
+        match cfg.apply_watched(&RealRunner, std::time::Duration::from_millis(900)) {
+            Ok(ApplyOutcome::Reverted) => {
+                eprintln!("{summary}: that change stopped Waybar, so it was reverted.");
+                1
+            }
+            Ok(_) => {
                 if let Some(s) = &store {
                     let _ = s.record(
                         SnapshotKind::Post,

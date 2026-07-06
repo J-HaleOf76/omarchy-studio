@@ -331,8 +331,9 @@ impl App {
                 &[],
             );
         }
+        use studio_core::modules::waybar::ApplyOutcome;
         match self.waybar.commit(&RealRunner) {
-            Ok(()) => {
+            Ok(outcome) => {
                 if let Ok(s) = &store {
                     let _ = s.record(
                         SnapshotKind::Post,
@@ -343,9 +344,15 @@ impl App {
                     );
                 }
                 self.waybar.reload(&self.paths);
-                self.toast = Some(Toast {
-                    text: "Saved bar layout · undo from Snapshots".into(),
-                    ok: true,
+                self.toast = Some(match outcome {
+                    ApplyOutcome::Reverted => Toast {
+                        text: "That change would have stopped Waybar — reverted.".into(),
+                        ok: false,
+                    },
+                    _ => Toast {
+                        text: "Saved bar layout · undo from Snapshots".into(),
+                        ok: true,
+                    },
                 });
             }
             Err(e) => {
