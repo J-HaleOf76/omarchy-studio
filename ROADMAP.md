@@ -53,7 +53,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 - [x] 0.5.1 mako tpl materializer: MakoTpl writes ~/.config/omarchy/themed/mako.ini.tpl = include core.ini + theme colour placeholders + Studio-managed behavior block; survives theme switch + omarchy-update; detects symlink-replaced-by-realfile degrade; apply = write → omarchy-theme-refresh → makoctl reload [05 §5]
 - [x] 0.5.2 mako schema (12 behavior settings, defaults mirror core.ini) + rule builder (per-app/urgency criteria→settings) + live test (notify-send low/normal/critical) + DND (makoctl mode); TUI Notifications screen (form + DND toggle + test picker + rules panel) + CLI notif list/get/set/rule/dnd/test [05 §5]
-- [ ] 0.5.3 swayosd editor + self-test [05 §6]
+- [x] 0.5.3 SwayOSD editor: config.toml (toml_edit: show-percentage/max-volume/top-margin) + style.css managed geometry block (radius/font, after ); apply → omarchy-restart-swayosd; self-test swayosd-client raise 0 (flash). CLI osd show/set/test + TUI "o" flash on Notifs/OSD screen [05 §6]
 - [ ] 0.5.4 hypridle timeline + hyprlock form (backup convention) [05 §7]
 - [ ] 0.5.5 Hooks install (theme-set, post-update) + doctor drift/clobber flows [02 §4, §6]
 - [ ] 0.5.6 Doctor screen [07]

@@ -33,6 +33,7 @@ fn main() {
         ["animations", rest @ ..] => animations(rest),
         ["waybar", rest @ ..] => waybar(rest),
         ["notif", rest @ ..] => notif(rest),
+        ["osd", rest @ ..] => osd(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -846,6 +847,143 @@ fn notif(args: &[&str]) -> i32 {
             eprintln!("apply failed: {e:?}");
             1
         }
+    }
+}
+
+fn osd(args: &[&str]) -> i32 {
+    use studio_core::modules::swayosd::{self, Swayosd};
+    let Some(paths) = omarchy() else { return 4 };
+
+    if let ["test"] = args {
+        return match swayosd::self_test(&RealRunner) {
+            Ok(()) => {
+                println!("flashed the OSD");
+                0
+            }
+            Err(e) => {
+                eprintln!("{e:?}");
+                1
+            }
+        };
+    }
+
+    let mut osd = Swayosd::load(&paths);
+    let summary = match args {
+        ["show"] | ["list"] | [] => {
+            println!("show-percentage  {}", osd.show_percentage);
+            println!("max-volume       {}", osd.max_volume);
+            println!(
+                "top-margin       {}",
+                osd.top_margin
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| "default".into())
+            );
+            println!(
+                "radius           {}",
+                osd.radius
+                    .map(|r| r.to_string())
+                    .unwrap_or_else(|| "default".into())
+            );
+            println!(
+                "font             {}",
+                osd.font_pt
+                    .map(|f| format!("{f}pt"))
+                    .unwrap_or_else(|| "default".into())
+            );
+            return 0;
+        }
+        ["set", "show-percentage", v] => match parse_bool(v) {
+            Some(b) => {
+                osd.show_percentage = b;
+                format!("osd show-percentage={b}")
+            }
+            None => {
+                eprintln!("show-percentage is on or off");
+                return 2;
+            }
+        },
+        ["set", "max-volume", v] => match v.parse::<i64>() {
+            Ok(n) if (1..=200).contains(&n) => {
+                osd.max_volume = n;
+                format!("osd max-volume={n}")
+            }
+            _ => {
+                eprintln!("max-volume must be 1–200");
+                return 2;
+            }
+        },
+        ["set", "top-margin", v] => match v.parse::<f64>() {
+            Ok(m) if (0.0..=1.0).contains(&m) => {
+                osd.top_margin = Some(m);
+                format!("osd top-margin={m}")
+            }
+            _ => {
+                eprintln!("top-margin must be between 0.0 and 1.0");
+                return 2;
+            }
+        },
+        ["set", "radius", v] => match v.parse::<i64>() {
+            Ok(n) if (0..=40).contains(&n) => {
+                osd.radius = Some(n);
+                format!("osd radius={n}")
+            }
+            _ => {
+                eprintln!("radius must be 0–40");
+                return 2;
+            }
+        },
+        ["set", "font", v] => match v.parse::<i64>() {
+            Ok(n) if (6..=32).contains(&n) => {
+                osd.font_pt = Some(n);
+                format!("osd font={n}pt")
+            }
+            _ => {
+                eprintln!("font must be 6–32 (pt)");
+                return 2;
+            }
+        },
+        _ => {
+            eprintln!(
+                "usage: osd show | set show-percentage <on|off> | set max-volume <n> | set top-margin <0..1> | set radius <n> | set font <pt> | test"
+            );
+            return 2;
+        }
+    };
+
+    let files = [
+        osd.config_path().to_path_buf(),
+        osd.style_path().to_path_buf(),
+    ];
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            &files,
+            "swayosd",
+            &[],
+        );
+    }
+    match osd.apply(&RealRunner) {
+        Ok(()) => {
+            if let Some(s) = &store {
+                let _ = s.record(SnapshotKind::Post, &summary, &files, "swayosd", &[]);
+            }
+            println!("{summary} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("apply failed: {e:?}");
+            1
+        }
+    }
+}
+
+fn parse_bool(s: &str) -> Option<bool> {
+    match s.to_ascii_lowercase().as_str() {
+        "on" | "true" | "1" | "yes" => Some(true),
+        "off" | "false" | "0" | "no" => Some(false),
+        _ => None,
     }
 }
 

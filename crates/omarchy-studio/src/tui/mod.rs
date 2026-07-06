@@ -321,6 +321,7 @@ impl App {
                 NotifAction::Save => self.apply_notifications(),
                 NotifAction::ToggleDnd => self.toggle_dnd(),
                 NotifAction::Test(urgency) => self.notif_test(&urgency),
+                NotifAction::OsdTest => self.osd_test(),
             },
             _ => {}
         }
@@ -459,6 +460,20 @@ impl App {
         use studio_core::modules::mako;
         self.notifications
             .set_dnd(Some(mako::dnd_active(&RealRunner)));
+    }
+
+    fn osd_test(&mut self) {
+        use studio_core::modules::swayosd;
+        self.toast = Some(match swayosd::self_test(&RealRunner) {
+            Ok(()) => Toast {
+                text: "flashed the on-screen display".into(),
+                ok: true,
+            },
+            Err(e) => Toast {
+                text: format!("couldn't flash OSD: {}", brief(e)),
+                ok: false,
+            },
+        });
     }
 
     /// Snapshot looknfeel.conf, apply an animation preset, live-reload, refresh.

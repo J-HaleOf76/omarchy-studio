@@ -270,6 +270,15 @@ pub mod cmds {
         Cmd::new("makoctl").arg("mode").arg("-r").arg(mode)
     }
 
+    /// Flash the SwayOSD popup without changing anything — a `raise 0` no-op
+    /// bump, used as the OSD self-test.
+    pub fn swayosd_selftest() -> Cmd {
+        Cmd::new("swayosd-client")
+            .arg("--output-volume")
+            .arg("raise")
+            .arg("0")
+    }
+
     /// Fire a sample notification (used by the live-test rows).
     pub fn notify_send(urgency: &str, summary: &str, body: &str) -> Cmd {
         Cmd::new("notify-send")

@@ -27,6 +27,8 @@ pub enum NotifAction {
     ToggleDnd,
     /// Fire a sample notification at this urgency.
     Test(String),
+    /// Flash the SwayOSD popup (no-op bump) so the user can preview its look.
+    OsdTest,
 }
 
 pub struct NotificationsScreen {
@@ -98,6 +100,7 @@ impl NotificationsScreen {
                 self.dirty = true;
             }
             KeyCode::Char('d') => return NotifAction::ToggleDnd,
+            KeyCode::Char('o') => return NotifAction::OsdTest,
             KeyCode::Char('t') => self.test_picker = Some(1), // default: normal
             KeyCode::Char('s') if self.dirty => return NotifAction::Save,
             _ => {}
@@ -277,7 +280,7 @@ impl NotificationsScreen {
         let p = Paragraph::new(vec![
             Line::from(vec![Span::styled("Notifications", skin.dim()), dirty]),
             Line::from(Span::styled(
-                "h/l adjust   r reset   d DND   t test   s save",
+                "h/l adjust   r reset   d DND   t test   o flash OSD   s save",
                 skin.dim(),
             )),
         ]);
