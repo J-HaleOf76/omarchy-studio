@@ -7,7 +7,7 @@
 | Working title | **Omarchy Studio** (binary: `omarchy-studio`) — name open for review, see §16 |
 | Version | 0.3 draft — approved direction (0.2: one-stop-shop scope; 0.3: guided dependency handling for missing tools/packages) |
 | Date | 2026-07-04 |
-| Author | Ariz (+ Claude research) |
+| Author | Ariz |
 | Target platform | Omarchy ≥ 3.8 (verified against 3.8.2 on this machine), Hyprland 0.55.x |
 | Status | Awaiting stakeholder (you) review |
 
