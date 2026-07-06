@@ -2,7 +2,7 @@
 
 **The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
-> **Status: alpha.** The modules below are built, tested (134 tests green), and drive the real Omarchy config on disk. Wallpapers and the palette-extraction lab are next on the roadmap. Tested against Omarchy 3.8.
+> **Status: alpha.** The modules below are built, tested (144 tests green), and drive the real Omarchy config on disk. The wallhaven browser and theme-from-wallpaper wizard are next on the roadmap. Tested against Omarchy 3.8.
 
 ## Why
 
@@ -22,6 +22,8 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Lock & Idle** | Retime the hypridle timeline (screensaver → lock → screen-off → suspend), hyprlock avatar/blur/dim | v0.5 |
 | **Update survival** | Lifecycle hooks (`theme-set`, `post-update`) re-assert Studio's style blocks after theme changes and flag drift/clobbers after `omarchy-update` | v0.5 |
 | **Doctor** | One health view: system facts, capability probes, hook status, drift report — in the TUI and the CLI | v0.5 |
+| **Wallpapers** | Browse all four background sources (yours / theme / videos) with badges, set/cycle/add/remove; video entries gated on mpvpaper | v0.6 |
+| **Palette extraction** | Median-cut engine: image → full `colors.toml` (normal / muted / material modes, dark/light bias, WCAG-safe) | v0.6 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
 
@@ -65,7 +67,7 @@ omarchy-studio          # launch the full-screen cockpit
 | `s` | save pending edits (snapshotted first) |
 | `/` | search · `?` help · `q` quit |
 
-Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. Screens for not-yet-built modules (Wallpaper, Snapshots browser) show an honest "arriving in …" placeholder rather than a broken UI.
+Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. Screens for not-yet-built modules (Snapshots browser, Integrations) show an honest "arriving in …" placeholder rather than a broken UI.
 
 ## CLI reference
 
@@ -74,6 +76,10 @@ Everything the TUI does is scriptable. Each mutating command prints its undo hin
 ```bash
 # Themes
 omarchy-studio theme list | current | apply <name> | fork <src> <new>
+omarchy-studio theme extract <image> [normal|muted|material] [auto|dark|light]
+
+# Wallpapers
+omarchy-studio wallpaper list | current | set <n|name|path> | next | add <file> | remove <name>
 
 # Snapshots / undo
 omarchy-studio snapshot list | undo | restore <id>
