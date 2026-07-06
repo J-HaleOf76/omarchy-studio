@@ -14,6 +14,7 @@ mod screens {
     pub mod looknfeel;
     pub mod palette_editor;
     pub mod themes;
+    pub mod waybar;
 }
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -32,6 +33,7 @@ use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
+use screens::waybar::{WaybarAction, WaybarScreen};
 use theme::Skin;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +108,7 @@ struct App {
     keybinds: KeybindsScreen,
     looknfeel: LookFeelScreen,
     animations: AnimationsScreen,
+    waybar: WaybarScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -129,6 +132,7 @@ impl App {
         let keybinds = KeybindsScreen::load(&paths, &RealRunner);
         let looknfeel = LookFeelScreen::load(&paths);
         let animations = AnimationsScreen::load(&paths);
+        let waybar = WaybarScreen::load(&paths);
         Self {
             paths,
             skin,
@@ -137,6 +141,7 @@ impl App {
             keybinds,
             looknfeel,
             animations,
+            waybar,
             editor: None,
             palette: None,
             help: false,
@@ -166,7 +171,8 @@ impl App {
         // Global chords (only when no in-screen text/chord/modal field is active).
         let capturing = (matches!(self.screen, Screen::Themes) && self.themes.is_capturing())
             || (matches!(self.screen, Screen::Keybinds) && self.keybinds.is_capturing())
-            || (matches!(self.screen, Screen::LookFeel) && self.looknfeel.is_modal());
+            || (matches!(self.screen, Screen::LookFeel) && self.looknfeel.is_modal())
+            || (matches!(self.screen, Screen::Waybar) && self.waybar.is_modal());
         if !capturing {
             match key.code {
                 KeyCode::Char('q') => {
@@ -299,7 +305,55 @@ impl App {
                 AnimAction::None => {}
                 AnimAction::Apply(name) => self.apply_animation(&name),
             },
+            Screen::Waybar => match self.waybar.handle(key) {
+                WaybarAction::None => {}
+                WaybarAction::Apply => self.apply_waybar(),
+            },
             _ => {}
+        }
+    }
+
+    /// Snapshot config.jsonc, save the bar layout, restart Waybar, refresh.
+    fn apply_waybar(&mut self) {
+        let Some(file) = self.waybar.config_path() else {
+            return;
+        };
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before: waybar layout change",
+                std::slice::from_ref(&file),
+                "waybar",
+                &[],
+            );
+        }
+        match self.waybar.commit(&RealRunner) {
+            Ok(()) => {
+                if let Ok(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        "waybar layout change",
+                        std::slice::from_ref(&file),
+                        "waybar",
+                        &[],
+                    );
+                }
+                self.waybar.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: "Saved bar layout · undo from Snapshots".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("waybar apply failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -740,6 +794,7 @@ impl App {
             Screen::Keybinds => self.keybinds.render(f, pad, &self.skin),
             Screen::LookFeel => self.looknfeel.render(f, pad, &self.skin),
             Screen::Animations => self.animations.render(f, pad, &self.skin),
+            Screen::Waybar => self.waybar.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
         }
     }

@@ -43,7 +43,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 - [x] 0.4.1 JSONC editor (span-splice, comment-preserving): GO — parse/get/array_items/set_scalar/reorder, byte-identical round-trip of real waybar config.jsonc; no external jsonc-parser dep [03 §3]
 - [x] 0.4.2 Waybar module catalog (20 modules: label/group/summary/deps/default-config snippet, custom/group fallbacks) + WaybarConfig model (lanes/reorder/add/remove/save/apply) [05 §4]
-- [ ] 0.4.3 Lanes widget + module forms + generic key/value editor [07 §4]
+- [x] 0.4.3 Waybar screen: three-lane layout with human module labels, J/K move in lane, H/L move across lanes, a=add (catalog picker), d=remove, s=apply (restart Waybar, snapshot-backed) [07 §4]
 - [ ] 0.4.4 style.css managed block (geometry) + @import-position assert [03 §4]
 - [ ] 0.4.5 Custom module wizard (script scaffold) [05 §4]
 - [ ] 0.4.6 Crash watchdog apply flow [05 §4]
