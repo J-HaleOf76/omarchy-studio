@@ -110,7 +110,7 @@ pub struct Registry {
 impl Registry {
     /// The registry shipped inside the binary (`data/integrations.toml`).
     pub fn builtin() -> Result<Self> {
-        Self::parse(include_str!("../../../data/integrations.toml"))
+        Self::parse(include_str!("../data/integrations.toml"))
     }
 
     pub fn parse(content: &str) -> Result<Self> {

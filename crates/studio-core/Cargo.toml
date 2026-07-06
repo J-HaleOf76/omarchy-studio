@@ -4,6 +4,12 @@ description = "Engine for Omarchy Studio: config model, parsers, apply pipeline,
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 toml_edit = { workspace = true }

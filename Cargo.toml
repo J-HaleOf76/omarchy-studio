@@ -6,9 +6,15 @@ members = ["crates/studio-core", "crates/omarchy-studio"]
 version = "0.0.1"
 edition = "2021"
 license = "MIT"
+authors = ["Ariz <arinopc22@gmail.com>"]
+repository = "https://github.com/arino08/omarchy-studio"
+homepage = "https://github.com/arino08/omarchy-studio"
+rust-version = "1.95"
+keywords = ["omarchy", "hyprland", "theming", "tui", "config"]
+categories = ["command-line-utilities", "config"]
 
 [workspace.dependencies]
-studio-core = { path = "crates/studio-core" }
+studio-core = { path = "crates/studio-core", version = "0.0.1" }
 toml_edit = "0.22"          # lossless TOML (colors.toml, walker/swayosd configs)
 ratatui = "0.29"            # TUI framework (crossterm re-exported via ratatui::crossterm)
 serde = { version = "1", features = ["derive"] }  # hyprctl -j, wallhaven API
