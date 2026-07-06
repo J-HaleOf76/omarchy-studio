@@ -11,6 +11,7 @@ mod logo;
 mod theme;
 mod screens {
     pub mod animations;
+    pub mod doctor;
     pub mod keybinds;
     pub mod lockidle;
     pub mod looknfeel;
@@ -35,6 +36,7 @@ use studio_core::omarchy::{cmds, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 use screens::animations::{AnimAction, AnimationsScreen};
+use screens::doctor::{DoctorAction, DoctorScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::lockidle::{LockIdleAction, LockIdleScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
@@ -101,6 +103,7 @@ impl Screen {
                 | Screen::Waybar
                 | Screen::Notifications
                 | Screen::LockIdle
+                | Screen::Doctor
         )
     }
 
@@ -133,6 +136,7 @@ struct App {
     waybar: WaybarScreen,
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
+    doctor: DoctorScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -160,6 +164,7 @@ impl App {
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
+        let doctor = DoctorScreen::load(&paths, &RealRunner);
         Self {
             paths,
             skin,
@@ -171,6 +176,7 @@ impl App {
             waybar,
             notifications,
             lockidle,
+            doctor,
             editor: None,
             palette: None,
             help: false,
@@ -350,6 +356,18 @@ impl App {
             Screen::LockIdle => match self.lockidle.handle(key) {
                 LockIdleAction::None => {}
                 LockIdleAction::Save => self.apply_lockidle(),
+            },
+            Screen::Doctor => match self.doctor.handle(key) {
+                DoctorAction::None => {}
+                DoctorAction::InstallHooks => self.install_hooks(),
+                DoctorAction::RemoveHooks => self.remove_hooks(),
+                DoctorAction::Refresh => {
+                    self.doctor.reload(&self.paths, &RealRunner);
+                    self.toast = Some(Toast {
+                        text: "Re-ran all checks".into(),
+                        ok: true,
+                    });
+                }
             },
             _ => {}
         }
@@ -552,6 +570,43 @@ impl App {
                 text: format!("lock & idle failed — {note}"),
                 ok: false,
             });
+        }
+    }
+
+    /// Install (or repair) the lifecycle hooks and refresh the Doctor view.
+    fn install_hooks(&mut self) {
+        match studio_core::hooks::install(&self.paths, &studio_core::studio_state_dir()) {
+            Ok(_) => {
+                self.doctor.reload(&self.paths, &RealRunner);
+                self.toast = Some(Toast {
+                    text: "Hooks installed — Studio now survives theme changes and updates".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("hook install failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    fn remove_hooks(&mut self) {
+        match studio_core::hooks::uninstall(&self.paths, &studio_core::studio_state_dir()) {
+            Ok(_) => {
+                self.doctor.reload(&self.paths, &RealRunner);
+                self.toast = Some(Toast {
+                    text: "Hooks removed".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("hook removal failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -1053,6 +1108,7 @@ impl App {
             Screen::Waybar => self.waybar.render(f, area, &self.skin),
             Screen::Notifications => self.notifications.render(f, area, &self.skin),
             Screen::LockIdle => self.lockidle.render(f, area, &self.skin),
+            Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
         }
     }
