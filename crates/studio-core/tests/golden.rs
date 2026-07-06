@@ -137,3 +137,47 @@ mod hyprlang {
         assert!(out.contains("gaps_in = 8"));
     }
 }
+
+mod jsonc {
+    use std::path::PathBuf;
+    use studio_core::configfs::jsonc::JsoncDoc;
+
+    fn waybar_config() -> String {
+        let p =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/waybar/config.jsonc");
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    #[test]
+    fn real_waybar_config_round_trips_byte_identical() {
+        let src = waybar_config();
+        let doc = JsoncDoc::parse(&src).expect("real waybar config should parse");
+        assert_eq!(doc.to_string(), src, "waybar config.jsonc must round-trip");
+    }
+
+    #[test]
+    fn reads_and_reorders_real_module_lanes() {
+        let src = waybar_config();
+        let mut doc = JsoncDoc::parse(&src).unwrap();
+        // the three lanes exist and are non-empty
+        for lane in ["modules-left", "modules-center", "modules-right"] {
+            let items = doc.array_items(lane).unwrap_or_default();
+            assert!(!items.is_empty(), "{lane} should have modules");
+        }
+        // reverse modules-left and confirm order flips while the rest is intact
+        let mut left = doc.array_items("modules-left").unwrap();
+        left.reverse();
+        doc.reorder("modules-left", &left).unwrap();
+        let out = doc.to_string();
+        let re = JsoncDoc::parse(&out).unwrap();
+        assert_eq!(re.array_items("modules-left").unwrap(), left);
+        // an untouched lane is unchanged
+        assert_eq!(
+            re.array_items("modules-center").unwrap(),
+            JsoncDoc::parse(&src)
+                .unwrap()
+                .array_items("modules-center")
+                .unwrap()
+        );
+    }
+}

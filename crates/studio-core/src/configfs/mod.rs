@@ -6,6 +6,7 @@
 //! never normalized, never dropped.
 
 pub mod hyprlang;
+pub mod jsonc;
 
 use std::path::Path;
 
