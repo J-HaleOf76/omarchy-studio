@@ -36,7 +36,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.3.3 preset loader + try(live)/apply(persist)/undo + managed section render; preset picker overlay [05 §3]
 - [x] 0.3.4 six hand-tuned presets: Omarchy default, Minimal, Cozy, Frosted glass, Performance, Focus
 - [x] 0.3.5 behavior toggles: core registry wrapping omarchy-*-toggle scripts (state via omarchy-hyprland-toggle-enabled), TUI toggle overlay (t) + CLI toggle list/<id> [05 §2]
-- [ ] 0.3.6 BezierCanvas editor behind feature flag [05 §3]
+- [x] 0.3.6 Animations: 6 hand-tuned feel presets (Off/Fast/Smooth/Minimal/Bouncy/Default) via managed block + reload; screen + CLI. (Visual bezier canvas deferred to feature-flagged 0.3.6b)
 - [x] 0.3.7 CLI looknfeel list/get/set + preset list/try/apply (snapshot-backed, live reload) [08]
 
 ## v0.4 — Waybar (~3 wks) — *exit: reorder bar + add custom module without touching JSON*

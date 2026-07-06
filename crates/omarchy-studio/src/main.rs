@@ -30,6 +30,7 @@ fn main() {
         ["looknfeel", rest @ ..] => looknfeel(rest),
         ["preset", rest @ ..] => preset(rest),
         ["toggle", rest @ ..] => toggle(rest),
+        ["animations", rest @ ..] => animations(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -396,6 +397,69 @@ fn apply_looknfeel(
         Err(e) => {
             eprintln!("apply failed: {e:?}");
             1
+        }
+    }
+}
+
+fn animations(args: &[&str]) -> i32 {
+    use studio_core::modules::animations::{apply, current, preset, PRESETS};
+    let Some(paths) = omarchy() else { return 4 };
+    match args {
+        ["list"] | [] => {
+            let cur = current(&paths);
+            for p in PRESETS {
+                let mark = if p.name == cur { "●" } else { " " };
+                println!("{mark} {:<10} {}", p.name, p.blurb);
+            }
+            0
+        }
+        ["current"] => {
+            println!("{}", current(&paths));
+            0
+        }
+        ["apply", name @ ..] if !name.is_empty() => {
+            let joined = name.join(" ");
+            let Some(p) = preset(&joined) else {
+                eprintln!("unknown animation preset `{joined}` — see `animations list`");
+                return 2;
+            };
+            let file = paths.hypr_config().join("looknfeel.conf");
+            let store = history().ok();
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Pre,
+                    &format!("before animations {}", p.name),
+                    std::slice::from_ref(&file),
+                    "animations",
+                    &[],
+                );
+            }
+            match apply(&paths, p, &RealRunner) {
+                Ok(_) => {
+                    if let Some(s) = &store {
+                        let _ = s.record(
+                            SnapshotKind::Post,
+                            &format!("animations {}", p.name),
+                            std::slice::from_ref(&file),
+                            "animations",
+                            &[],
+                        );
+                    }
+                    println!(
+                        "Animations: {} · undo with `omarchy-studio snapshot undo`",
+                        p.name
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("apply failed: {e:?}");
+                    1
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: animations list | current | apply <name>");
+            2
         }
     }
 }

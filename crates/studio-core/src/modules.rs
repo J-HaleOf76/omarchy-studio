@@ -12,6 +12,7 @@
 //! | `wallpapers` | M2 | 04 §5–6 | v0.6 |
 //! | `extraction` | FR1.8 | 04 §4 | v0.6 |
 
+pub mod animations;
 pub mod color;
 pub mod dispatchers;
 pub mod keybinds;

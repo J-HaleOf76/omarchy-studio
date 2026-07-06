@@ -9,6 +9,7 @@
 mod chord;
 mod theme;
 mod screens {
+    pub mod animations;
     pub mod keybinds;
     pub mod looknfeel;
     pub mod palette_editor;
@@ -26,6 +27,7 @@ use studio_core::modules::themes::ThemeStore;
 use studio_core::omarchy::{cmds, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
+use screens::animations::{AnimAction, AnimationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
@@ -103,6 +105,7 @@ struct App {
     themes: ThemesScreen,
     keybinds: KeybindsScreen,
     looknfeel: LookFeelScreen,
+    animations: AnimationsScreen,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -125,6 +128,7 @@ impl App {
         }
         let keybinds = KeybindsScreen::load(&paths, &RealRunner);
         let looknfeel = LookFeelScreen::load(&paths);
+        let animations = AnimationsScreen::load(&paths);
         Self {
             paths,
             skin,
@@ -132,6 +136,7 @@ impl App {
             themes,
             keybinds,
             looknfeel,
+            animations,
             editor: None,
             palette: None,
             help: false,
@@ -290,7 +295,57 @@ impl App {
                     }
                 }
             },
+            Screen::Animations => match self.animations.handle(key) {
+                AnimAction::None => {}
+                AnimAction::Apply(name) => self.apply_animation(&name),
+            },
             _ => {}
+        }
+    }
+
+    /// Snapshot looknfeel.conf, apply an animation preset, live-reload, refresh.
+    fn apply_animation(&mut self, name: &str) {
+        use studio_core::modules::animations;
+        let Some(preset) = animations::preset(name) else {
+            return;
+        };
+        let file = self.paths.hypr_config().join("looknfeel.conf");
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                &format!("before animations: {name}"),
+                std::slice::from_ref(&file),
+                "animations",
+                &[],
+            );
+        }
+        match animations::apply(&self.paths, preset, &RealRunner) {
+            Ok(_) => {
+                if let Ok(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        &format!("animations: {name}"),
+                        std::slice::from_ref(&file),
+                        "animations",
+                        &[],
+                    );
+                }
+                self.animations.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: format!("Animations: {name} · undo from Snapshots"),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("animation change failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -684,6 +739,7 @@ impl App {
             Screen::Themes => self.themes.render(f, pad, &self.skin),
             Screen::Keybinds => self.keybinds.render(f, pad, &self.skin),
             Screen::LookFeel => self.looknfeel.render(f, pad, &self.skin),
+            Screen::Animations => self.animations.render(f, pad, &self.skin),
             other => self.draw_placeholder(f, pad, other),
         }
     }
