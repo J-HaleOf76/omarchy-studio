@@ -2,7 +2,7 @@
 
 **The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
-> **Status: alpha.** The modules below are built, tested (144 tests green), and drive the real Omarchy config on disk. The wallhaven browser and theme-from-wallpaper wizard are next on the roadmap. Tested against Omarchy 3.8.
+> **Status: alpha.** The modules below are built, tested (150 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete. Tested against Omarchy 3.8.
 
 ## Why
 
@@ -12,7 +12,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 
 | Module | What you can do | Since |
 |---|---|---|
-| **Themes** | List, show current, apply, fork an existing theme into your own | v0.1 |
+| **Themes** | List, show current, apply, fork — with a live preview pane: the theme's wallpaper + a mock terminal drawn in its palette | v0.1 |
 | **Keybinds** | Browse and rebind Hyprland keybindings, live capture | v0.2 |
 | **Look & Feel** | Gaps, borders, rounding, opacity and other Hyprland variables | v0.3 |
 | **Animations** | Apply curated animation presets | v0.3 |
@@ -22,8 +22,12 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Lock & Idle** | Retime the hypridle timeline (screensaver → lock → screen-off → suspend), hyprlock avatar/blur/dim | v0.5 |
 | **Update survival** | Lifecycle hooks (`theme-set`, `post-update`) re-assert Studio's style blocks after theme changes and flag drift/clobbers after `omarchy-update` | v0.5 |
 | **Doctor** | One health view: system facts, capability probes, hook status, drift report — in the TUI and the CLI | v0.5 |
-| **Wallpapers** | Browse all four background sources (yours / theme / videos) with badges, set/cycle/add/remove; video entries gated on mpvpaper | v0.6 |
+| **Wallpapers** | Browse all four background sources (yours / theme / videos) with in-terminal previews (kitty / sixel / half-blocks), set/cycle/add/remove, `o` opens in imv/mpv | v0.6 |
 | **Palette extraction** | Median-cut engine: image → full `colors.toml` (normal / muted / material modes, dark/light bias, WCAG-safe) | v0.6 |
+| **Theme wizard** | `t` on any wallpaper (or `theme new --from-image`): live extraction → named, 100 % standard theme dir with preview.png | v0.6 |
+| **wallhaven** | Search wallhaven.cc from the CLI with color-match ("walls like my accent"), ratio and toplist filters; download straight into your backgrounds | v0.6 |
+| **Integrations** | Dependency health + companion-tool detection (Aether, Omarchist, matugen, hyprmon) with launch actions; "Open in Aether" appears in the wallpaper browser when installed | v0.6 |
+| **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
 
@@ -64,10 +68,12 @@ omarchy-studio          # launch the full-screen cockpit
 | `j` / `k`, arrows | move within a screen |
 | `h` / `l` | adjust the selected value |
 | `Enter` | open a picker (avatar, theme, …) |
+| `t` | (wallpapers) craft a theme from the selected image |
+| `o` | (wallpapers) open in imv / mpv |
 | `s` | save pending edits (snapshotted first) |
 | `/` | search · `?` help · `q` quit |
 
-Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. Screens for not-yet-built modules (Snapshots browser, Integrations) show an honest "arriving in …" placeholder rather than a broken UI.
+Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. The one not-yet-built screen (the Snapshots browser) shows an honest "arriving in …" placeholder rather than a broken UI.
 
 ## CLI reference
 
@@ -76,10 +82,12 @@ Everything the TUI does is scriptable. Each mutating command prints its undo hin
 ```bash
 # Themes
 omarchy-studio theme list | current | apply <name> | fork <src> <new>
+omarchy-studio theme new <name> --from-image <path> [--mode normal|muted|material] [--bias auto|dark|light] [--apply]
 omarchy-studio theme extract <image> [normal|muted|material] [auto|dark|light]
 
 # Wallpapers
 omarchy-studio wallpaper list | current | set <n|name|path> | next | add <file> | remove <name>
+omarchy-studio wallpaper wallhaven search <query> [--color <hex>] [--ratio 16x9] [--top] [--page N] [--download <n>]
 
 # Snapshots / undo
 omarchy-studio snapshot list | undo | restore <id>
@@ -117,6 +125,10 @@ omarchy-studio osd test
 omarchy-studio idle timeline
 omarchy-studio idle set <screensaver|lock|screen-off|suspend> <seconds>
 omarchy-studio lock show | avatar <path> | avatar list | size <px> | blur <n> | dim <0..1> | preview
+
+# Battery charge thresholds (ThinkPads & friends — no TLP needed)
+omarchy-studio battery [status]
+omarchy-studio battery limit <start> <stop> [--persist]   # --persist under sudo survives reboots
 
 # Update-survival hooks
 omarchy-studio hooks install | remove | status
