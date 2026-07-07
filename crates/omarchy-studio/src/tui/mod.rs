@@ -13,6 +13,7 @@ mod theme;
 mod screens {
     pub mod animations;
     pub mod doctor;
+    pub mod integrations;
     pub mod keybinds;
     pub mod lockidle;
     pub mod looknfeel;
@@ -40,6 +41,7 @@ use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 use screens::animations::{AnimAction, AnimationsScreen};
 use screens::doctor::{DoctorAction, DoctorScreen};
+use screens::integrations::{IntegrationsAction, IntegrationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::lockidle::{LockIdleAction, LockIdleScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
@@ -109,6 +111,7 @@ impl Screen {
                 | Screen::Waybar
                 | Screen::Notifications
                 | Screen::LockIdle
+                | Screen::Integrations
                 | Screen::Doctor
         )
     }
@@ -143,6 +146,7 @@ struct App {
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
     doctor: DoctorScreen,
+    integrations: IntegrationsScreen,
     wallpapers: WallpapersScreen,
     /// Shared terminal-graphics preview cell (probed once at startup).
     images: imagecell::ImageCell,
@@ -179,12 +183,14 @@ impl App {
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
+        let integrations = IntegrationsScreen::load(&RealRunner);
         let mut doctor = DoctorScreen::load(&paths, &RealRunner);
         doctor.set_graphics(images.protocol_label());
-        let wallpapers = WallpapersScreen::load(
+        let mut wallpapers = WallpapersScreen::load(
             &paths,
             studio_core::omarchy::Capabilities::probe(&paths, &RealRunner).video_wallpapers,
         );
+        wallpapers.context_tools = integrations.context_actions("wallpapers");
         Self {
             paths,
             skin,
@@ -197,6 +203,7 @@ impl App {
             notifications,
             lockidle,
             doctor,
+            integrations,
             wallpapers,
             images,
             wizard: None,
@@ -398,6 +405,26 @@ impl App {
                 WallpaperAction::Remove(entry) => self.wp_remove(&entry),
                 WallpaperAction::Open(entry) => self.wp_open(&entry),
                 WallpaperAction::Craft(entry) => self.open_wizard(&entry),
+                WallpaperAction::Tool {
+                    exec,
+                    label,
+                    terminal,
+                } => self.launch_tool(&exec, &label, terminal),
+            },
+            Screen::Integrations => match self.integrations.handle(key) {
+                IntegrationsAction::None => {}
+                IntegrationsAction::Launch {
+                    exec,
+                    label,
+                    terminal,
+                } => self.launch_tool(&exec, &label, terminal),
+                IntegrationsAction::Refresh => {
+                    self.integrations.reload(&RealRunner);
+                    self.toast = Some(Toast {
+                        text: "Re-detected tools".into(),
+                        ok: true,
+                    });
+                }
             },
             Screen::Doctor => match self.doctor.handle(key) {
                 DoctorAction::None => {}
@@ -632,6 +659,44 @@ impl App {
             Err(e) => {
                 self.toast = Some(Toast {
                     text: format!("couldn't set wallpaper: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Launch a companion tool (Integrations screen / contextual actions),
+    /// detached and reaped; callers only pass actions of tools detected as
+    /// installed. TUI tools go through Omarchy's floating-terminal launcher —
+    /// detaching them with no tty would just kill them.
+    fn launch_tool(&mut self, exec: &str, label: &str, terminal: bool) {
+        let (bin, args): (&str, Vec<&str>) = if terminal {
+            (
+                "omarchy-launch-floating-terminal-with-presentation",
+                vec![exec],
+            )
+        } else {
+            ("sh", vec!["-c", exec])
+        };
+        match std::process::Command::new(bin)
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                self.toast = Some(Toast {
+                    text: format!("Launched {label}"),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't launch {label}: {e}"),
                     ok: false,
                 });
             }
@@ -1332,6 +1397,7 @@ impl App {
             Screen::Wallpapers => self
                 .wallpapers
                 .render(f, area, &self.skin, &mut self.images),
+            Screen::Integrations => self.integrations.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
         }

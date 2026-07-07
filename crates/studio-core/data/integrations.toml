@@ -80,7 +80,7 @@ install = "yay -S aether"
 license = "MIT"
 interop = "themes"
 actions = [
-  { id = "open", label = "Open in Aether (image filters & advanced extraction)", exec = "aether", context = "wallpapers" },
+  { id = "open", label = "Open in Aether (image filters & advanced extraction)", exec = "aether", context = "wallpapers", terminal = true },
 ]
 
 [tools.omarchist]
@@ -107,5 +107,5 @@ probe = "hyprmon"
 homepage = "https://github.com/erans/hyprmon"
 install = "yay -S hyprmon"
 actions = [
-  { id = "monitors", label = "Configure monitors (hyprmon)", exec = "hyprmon", context = "setup" },
+  { id = "monitors", label = "Configure monitors (hyprmon)", exec = "hyprmon", context = "setup", terminal = true },
 ]

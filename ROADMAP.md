@@ -65,7 +65,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.6.3 wallhaven client (search/filters/rate budget/thumb cache) [04 §6]
 - [x] 0.6.4 ImageCell + graphics probe + imv fallback [07 §4, 06]
 - [x] 0.6.5 Theme-from-wallpaper wizard [04 §7]
-- [ ] 0.6.6 Integrations screen (tool registry, contextual actions) [06 §5]
+- [x] 0.6.6 Integrations screen (tool registry, contextual actions) [06 §5]
 - [ ] 0.6.7 CLI `wallpaper wallhaven search/download`, `theme new --from-image` [08]
 
 ## v1.0 — Polish (~2 wks) — *exit: a stranger installs from AUR and rices start-to-finish*

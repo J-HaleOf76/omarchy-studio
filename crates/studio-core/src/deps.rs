@@ -85,6 +85,8 @@ pub struct ToolAction {
     pub exec: String,
     /// Screen where the action surfaces contextually (None = Integrations only).
     pub context: Option<String>,
+    /// The tool is a TUI — launch it in a floating terminal, not detached.
+    pub terminal: bool,
 }
 
 /// Everything a frontend needs to render the guidance banner (spec 06 §3).
@@ -181,6 +183,10 @@ impl Registry {
                                         .get("context")
                                         .and_then(|c| c.as_str())
                                         .map(str::to_string),
+                                    terminal: it
+                                        .get("terminal")
+                                        .and_then(|b| b.as_bool())
+                                        .unwrap_or(false),
                                 })
                             })
                             .collect()
@@ -217,6 +223,38 @@ impl Registry {
     pub fn dep(&self, id: &str) -> Option<&DepSpec> {
         self.deps.iter().find(|d| d.id == id)
     }
+
+    /// Built-in registry with the user's overlay applied, when one exists
+    /// (`~/.config/omarchy-studio/integrations.toml`, entries win by id).
+    pub fn load() -> crate::error::Result<Self> {
+        let builtin = Self::builtin()?;
+        let user_file = crate::studio_config_dir().join("integrations.toml");
+        match std::fs::read_to_string(&user_file) {
+            Ok(text) => Ok(builtin.merge(Self::parse(&text)?)),
+            Err(_) => Ok(builtin),
+        }
+    }
+}
+
+/// A companion tool with its detection result (spec 06 §5).
+#[derive(Debug, Clone)]
+pub struct ToolReport {
+    pub spec: ToolSpec,
+    pub present: bool,
+}
+
+/// Detect every companion tool — the Integrations screen's second half.
+pub fn probe_tools(reg: &Registry) -> Vec<ToolReport> {
+    reg.tools
+        .iter()
+        .map(|t| ToolReport {
+            present: t
+                .probe
+                .as_deref()
+                .is_some_and(|p| find_in_path(p).is_some()),
+            spec: t.clone(),
+        })
+        .collect()
 }
 
 /// Probe one dependency (spec 06 §2). Graphics/network are `Deferred` —

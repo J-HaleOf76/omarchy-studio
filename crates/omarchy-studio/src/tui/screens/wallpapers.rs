@@ -33,6 +33,12 @@ pub enum WallpaperAction {
     Open(Entry),
     /// Craft a theme from this image (opens the wizard).
     Craft(Entry),
+    /// Run a companion tool's contextual action (spec 06 §5).
+    Tool {
+        exec: String,
+        label: String,
+        terminal: bool,
+    },
 }
 
 pub struct WallpapersScreen {
@@ -42,6 +48,9 @@ pub struct WallpapersScreen {
     selected: usize,
     /// Add-wallpaper path prompt, when open.
     input: Option<String>,
+    /// Contextual actions from present companion tools (label, exec,
+    /// needs-terminal) — e.g. "Open in Aether" when installed (spec 06 §5).
+    pub context_tools: Vec<(String, String, bool)>,
 }
 
 impl WallpapersScreen {
@@ -51,6 +60,7 @@ impl WallpapersScreen {
             videos_ok,
             selected: 0,
             input: None,
+            context_tools: Vec::new(),
         }
     }
 
@@ -117,6 +127,15 @@ impl WallpapersScreen {
             KeyCode::Char('t') => {
                 if let Some(e) = self.selected_entry() {
                     return WallpaperAction::Craft(e.clone());
+                }
+            }
+            KeyCode::Char('A') => {
+                if let Some((label, exec, terminal)) = self.context_tools.first() {
+                    return WallpaperAction::Tool {
+                        exec: exec.clone(),
+                        label: label.clone(),
+                        terminal: *terminal,
+                    };
                 }
             }
             KeyCode::Char('a') => self.input = Some(String::new()),
@@ -212,10 +231,13 @@ impl WallpapersScreen {
                 skin.warn(),
             )));
         } else {
-            footer.push(Line::from(Span::styled(
-                "enter set · n next · o open · t theme from this · a add · x remove",
-                skin.dim(),
-            )));
+            let mut hint =
+                String::from("enter set · n next · o open · t theme from this · a add · x remove");
+            if let Some((label, ..)) = self.context_tools.first() {
+                let short = label.split(" (").next().unwrap_or(label);
+                hint.push_str(&format!(" · A {short}"));
+            }
+            footer.push(Line::from(Span::styled(hint, skin.dim())));
         }
         f.render_widget(Paragraph::new(footer), rows[1]);
 
