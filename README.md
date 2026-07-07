@@ -2,6 +2,8 @@
 
 **The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
+![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
+
 > **Status: alpha.** The modules below are built, tested (150 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete. Tested against Omarchy 3.8.
 
 ## Why
@@ -30,6 +32,11 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
+
+| | |
+|---|---|
+| ![Themes with live preview](docs/assets/themes.png) | ![Wallpaper browser with in-terminal previews](docs/assets/wallpapers.png) |
+| ![Theme-from-wallpaper wizard](docs/assets/wizard.png) | ![Doctor health view](docs/assets/doctor.png) |
 
 ## Install
 
@@ -154,6 +161,7 @@ omarchy-studio doctor [--deps] [--quiet]
 | `ROADMAP.md` | Milestones broken into issue-sized tasks |
 | `crates/studio-core/` | Engine library: config model, comment-preserving parsers, apply pipeline, snapshots, Omarchy adapter |
 | `crates/omarchy-studio/` | The binary: TUI + CLI frontends |
+| `tools/termshot/` | Renders tmux captures to the README media (screenshots + tour GIF) |
 | `data/` | Bundled presets and the integrations registry |
 
 ## License

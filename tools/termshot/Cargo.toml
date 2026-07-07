@@ -1,0 +1,14 @@
+# Standalone repo tool — deliberately NOT a member of the publishing
+# workspace (own [workspace] table): it exists to render README/CI media,
+# never to ship.
+[package]
+name = "termshot"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "gif"] }
+fontdue = "0.9"
