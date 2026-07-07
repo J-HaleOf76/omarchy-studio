@@ -1938,7 +1938,7 @@ pub fn run() -> i32 {
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     break Ok(());
                 }
-                app.on_key(key);
+                app.on_key(chord::normalize(key));
                 if app.quit {
                     break Ok(());
                 }

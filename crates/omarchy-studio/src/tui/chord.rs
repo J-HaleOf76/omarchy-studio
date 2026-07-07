@@ -17,7 +17,26 @@ pub fn enhancement_flags() -> ratatui::crossterm::event::KeyboardEnhancementFlag
     use ratatui::crossterm::event::KeyboardEnhancementFlags as F;
     // Report all keys (incl. modifiers as events) and disambiguate them, so a
     // bare SUPER press is visible and SUPER-as-a-modifier is distinguishable.
-    F::DISAMBIGUATE_ESCAPE_CODES | F::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+    // REPORT_ALTERNATE_KEYS matters for ordinary chords too: without it the
+    // kitty protocol delivers shift+a as `Char('a')`+SHIFT, and every
+    // uppercase binding (`A`, `G`, waybar's `J/K/H/L`, …) goes dead in
+    // kitty/ghostty/alacritty while still working in tmux/xterm.
+    F::DISAMBIGUATE_ESCAPE_CODES | F::REPORT_ALL_KEYS_AS_ESCAPE_CODES | F::REPORT_ALTERNATE_KEYS
+}
+
+/// Undo the kitty protocol's lowercase-plus-SHIFT reporting so screens can
+/// keep matching `Char('A')` & co. Also what a text field wants: shift+a
+/// must insert `A`. A no-op for events that already carry the shifted char
+/// (legacy encoding, or REPORT_ALTERNATE_KEYS honored by the terminal).
+pub fn normalize(mut ev: KeyEvent) -> KeyEvent {
+    if ev.modifiers.contains(KeyModifiers::SHIFT) {
+        if let KeyCode::Char(c) = ev.code {
+            if c.is_ascii_lowercase() {
+                ev.code = KeyCode::Char(c.to_ascii_uppercase());
+            }
+        }
+    }
+    ev
 }
 
 /// Convert a key event into a Hyprland chord `(modmask, key_name)`.
@@ -109,6 +128,28 @@ mod tests {
             let (_, key) = capture(&ev(code, KeyModifiers::NONE)).unwrap();
             assert_eq!(key, want);
         }
+    }
+
+    #[test]
+    fn normalize_recovers_uppercase_from_kitty_reporting() {
+        // kitty protocol without alternate keys: shift+a arrives lowercase
+        let n = normalize(ev(KeyCode::Char('a'), KeyModifiers::SHIFT));
+        assert_eq!(n.code, KeyCode::Char('A'));
+        assert!(n.modifiers.contains(KeyModifiers::SHIFT));
+        // already-shifted (legacy encoding) and unshifted events pass through
+        assert_eq!(
+            normalize(ev(KeyCode::Char('A'), KeyModifiers::SHIFT)).code,
+            KeyCode::Char('A')
+        );
+        assert_eq!(
+            normalize(ev(KeyCode::Char('a'), KeyModifiers::NONE)).code,
+            KeyCode::Char('a')
+        );
+        // shifted punctuation is the terminal's business — untouched
+        assert_eq!(
+            normalize(ev(KeyCode::Char('/'), KeyModifiers::SHIFT)).code,
+            KeyCode::Char('/')
+        );
     }
 
     #[test]
