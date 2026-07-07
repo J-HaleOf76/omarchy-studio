@@ -1,0 +1,60 @@
+{
+  "data": [
+    {
+      "id": "94x38z",
+      "url": "https://wallhaven.cc/w/94x38z",
+      "short_url": "https://whvn.cc/94x38z",
+      "views": 12420,
+      "favorites": 312,
+      "source": "",
+      "purity": "sfw",
+      "category": "general",
+      "dimension_x": 3840,
+      "dimension_y": 2160,
+      "resolution": "3840x2160",
+      "ratio": "1.78",
+      "file_size": 3820134,
+      "file_type": "image/jpeg",
+      "created_at": "2024-11-02 20:14:09",
+      "colors": ["#000000", "#336600", "#66cccc"],
+      "path": "https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg",
+      "thumbs": {
+        "large": "https://th.wallhaven.cc/lg/94/94x38z.jpg",
+        "original": "https://th.wallhaven.cc/orig/94/94x38z.jpg",
+        "small": "https://th.wallhaven.cc/small/94/94x38z.jpg"
+      }
+    },
+    {
+      "id": "e7g6vk",
+      "url": "https://wallhaven.cc/w/e7g6vk",
+      "short_url": "https://whvn.cc/e7g6vk",
+      "views": 8891,
+      "favorites": 104,
+      "source": "https://example.com/artist",
+      "purity": "sfw",
+      "category": "anime",
+      "dimension_x": 2560,
+      "dimension_y": 1440,
+      "resolution": "2560x1440",
+      "ratio": "1.78",
+      "file_size": 1204483,
+      "file_type": "image/png",
+      "created_at": "2025-01-17 08:03:55",
+      "colors": ["#424153", "#993399"],
+      "path": "https://w.wallhaven.cc/full/e7/wallhaven-e7g6vk.png",
+      "thumbs": {
+        "large": "https://th.wallhaven.cc/lg/e7/e7g6vk.jpg",
+        "original": "https://th.wallhaven.cc/orig/e7/e7g6vk.jpg",
+        "small": "https://th.wallhaven.cc/small/e7/e7g6vk.jpg"
+      }
+    }
+  ],
+  "meta": {
+    "current_page": 1,
+    "last_page": 47,
+    "per_page": 24,
+    "total": 1128,
+    "query": "landscape",
+    "seed": null
+  }
+}

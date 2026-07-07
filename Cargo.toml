@@ -20,10 +20,10 @@ ratatui = "0.29"            # TUI framework (crossterm re-exported via ratatui::
 serde = { version = "1", features = ["derive"] }  # hyprctl -j, wallhaven API
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }  # palette extraction (v0.6)
+ureq = "2"                  # wallhaven client, blocking on a worker thread — no async runtime (v0.6)
 # Planned dependencies — added per milestone, see docs/specs/01-architecture.md §6:
 # clap = "4"                # CLI (v0.1)
 # serde / serde_json = "1"  # hyprctl -j, wallhaven API (v0.1)
 # thiserror = "2"           # error taxonomy (v0.1)
 # jsonc-parser = "0.26"     # waybar config CST (v0.4)
 # ratatui-image = "8"       # kitty/sixel previews (v0.6)
-# ureq = "2"                # wallhaven client, no async runtime needed (v0.6)
