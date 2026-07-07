@@ -21,6 +21,7 @@ mod screens {
     pub mod themes;
     pub mod wallpapers;
     pub mod waybar;
+    pub mod wizard;
 }
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -47,6 +48,7 @@ use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
 use screens::wallpapers::{WallpaperAction, WallpapersScreen};
 use screens::waybar::{WaybarAction, WaybarScreen};
+use screens::wizard::{WizardAction, WizardScreen};
 use theme::Skin;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +146,8 @@ struct App {
     wallpapers: WallpapersScreen,
     /// Shared terminal-graphics preview cell (probed once at startup).
     images: imagecell::ImageCell,
+    /// Theme-from-wallpaper wizard, when open (modal over everything).
+    wizard: Option<WizardScreen>,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -195,6 +199,7 @@ impl App {
             doctor,
             wallpapers,
             images,
+            wizard: None,
             editor: None,
             palette: None,
             help: false,
@@ -218,6 +223,15 @@ impl App {
         // The palette editor is a focused mode: it owns all keys while open.
         if self.editor.is_some() {
             self.editor_key(key);
+            return;
+        }
+        // So is the theme-from-wallpaper wizard (it has a text field).
+        if let Some(w) = self.wizard.as_mut() {
+            match w.handle(key) {
+                WizardAction::None => {}
+                WizardAction::Cancel => self.wizard = None,
+                WizardAction::Create => self.wizard_create(),
+            }
             return;
         }
 
@@ -383,6 +397,7 @@ impl App {
                 WallpaperAction::Add(path) => self.wp_add(&path),
                 WallpaperAction::Remove(entry) => self.wp_remove(&entry),
                 WallpaperAction::Open(entry) => self.wp_open(&entry),
+                WallpaperAction::Craft(entry) => self.open_wizard(&entry),
             },
             Screen::Doctor => match self.doctor.handle(key) {
                 DoctorAction::None => {}
@@ -652,6 +667,62 @@ impl App {
             Err(_) => {
                 self.toast = Some(Toast {
                     text: format!("{viewer} is not installed — sudo pacman -S {viewer}"),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// `t` on a wallpaper: extract a palette from it and open the wizard.
+    fn open_wizard(&mut self, entry: &studio_core::modules::wallpapers::Entry) {
+        use studio_core::modules::wallpapers::Kind;
+        if entry.kind == Kind::Video {
+            self.toast = Some(Toast {
+                text: "palettes come from stills — pick an image or gif".into(),
+                ok: false,
+            });
+            return;
+        }
+        match WizardScreen::open(&entry.path) {
+            Ok(w) => self.wizard = Some(w),
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't read image: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Enter in the wizard: write the theme dir, land the user on Themes
+    /// with the new theme ready to apply or refine in the palette editor.
+    fn wizard_create(&mut self) {
+        let Some(w) = self.wizard.as_ref() else {
+            return;
+        };
+        match studio_core::modules::wizard::materialize(
+            &self.paths,
+            &w.name,
+            &w.image,
+            &w.extraction,
+        ) {
+            Ok(dir) => {
+                let slug = dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.wizard = None;
+                self.themes = ThemesScreen::load(&self.paths);
+                self.screen = Screen::Themes;
+                self.toast = Some(Toast {
+                    text: format!("Theme `{slug}` created — apply it here, or e to refine"),
+                    ok: true,
+                });
+            }
+            // duplicate name / io trouble: stay open so the name can change
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: brief(e),
                     ok: false,
                 });
             }
@@ -1141,6 +1212,9 @@ impl App {
         self.draw_panel(f, cols[1]);
         self.draw_keybar(f, rows[1]);
 
+        if let Some(w) = &self.wizard {
+            w.render(f, cols[1], &self.skin);
+        }
         if self.help {
             self.draw_help(f);
         }

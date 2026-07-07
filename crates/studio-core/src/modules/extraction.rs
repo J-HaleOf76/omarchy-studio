@@ -50,13 +50,18 @@ pub enum Bias {
 }
 
 impl Bias {
-    pub fn parse(s: &str) -> Option<Bias> {
-        match s {
-            "auto" => Some(Bias::Auto),
-            "dark" => Some(Bias::Dark),
-            "light" => Some(Bias::Light),
-            _ => None,
+    pub const ALL: [Bias; 3] = [Bias::Auto, Bias::Dark, Bias::Light];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Bias::Auto => "auto",
+            Bias::Dark => "dark",
+            Bias::Light => "light",
         }
+    }
+
+    pub fn parse(s: &str) -> Option<Bias> {
+        Bias::ALL.into_iter().find(|b| b.label() == s)
     }
 }
 
@@ -353,8 +358,9 @@ pub fn extract(samples: &[(u8, u8, u8)], mode: Mode, bias: Bias) -> Extraction {
     ex
 }
 
-/// Decode an image, sample it down (~16k pixels), and extract.
-pub fn extract_image(path: &Path, mode: Mode, bias: Bias) -> Result<Extraction> {
+/// Decode an image and sample it down to ~16k pixels — decode once, then
+/// re-run [`extract`] cheaply on mode/bias changes (the wizard's live loop).
+pub fn sample_image(path: &Path) -> Result<Vec<(u8, u8, u8)>> {
     let img = image::open(path)
         .map_err(|e| StudioError::External {
             cmd: format!("decode {}", path.display()),
@@ -375,7 +381,12 @@ pub fn extract_image(path: &Path, mode: Mode, bias: Bias) -> Result<Extraction> 
         }
         y += stride;
     }
-    Ok(extract(&samples, mode, bias))
+    Ok(samples)
+}
+
+/// Decode an image, sample it down (~16k pixels), and extract.
+pub fn extract_image(path: &Path, mode: Mode, bias: Bias) -> Result<Extraction> {
+    Ok(extract(&sample_image(path)?, mode, bias))
 }
 
 #[cfg(test)]

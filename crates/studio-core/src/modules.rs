@@ -12,6 +12,7 @@
 //! | `wallpapers` | M2 | 04 §5–6 | v0.6 |
 //! | `extraction` | FR1.8 | 04 §4 | v0.6 |
 //! | `wallhaven` | FR2.4 | 04 §6 | v0.6 |
+//! | `wizard` | FR2.5 | 04 §7 | v0.6 |
 
 pub mod animations;
 pub mod color;
@@ -27,3 +28,4 @@ pub mod toggles;
 pub mod wallhaven;
 pub mod wallpapers;
 pub mod waybar;
+pub mod wizard;

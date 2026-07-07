@@ -31,6 +31,8 @@ pub enum WallpaperAction {
     Remove(Entry),
     /// Open in an external viewer (imv, mpv for videos).
     Open(Entry),
+    /// Craft a theme from this image (opens the wizard).
+    Craft(Entry),
 }
 
 pub struct WallpapersScreen {
@@ -110,6 +112,11 @@ impl WallpapersScreen {
             KeyCode::Char('o') => {
                 if let Some(e) = self.selected_entry() {
                     return WallpaperAction::Open(e.clone());
+                }
+            }
+            KeyCode::Char('t') => {
+                if let Some(e) = self.selected_entry() {
+                    return WallpaperAction::Craft(e.clone());
                 }
             }
             KeyCode::Char('a') => self.input = Some(String::new()),
@@ -206,7 +213,7 @@ impl WallpapersScreen {
             )));
         } else {
             footer.push(Line::from(Span::styled(
-                "enter set · n next · o open · a add file · x remove (your files)",
+                "enter set · n next · o open · t theme from this · a add · x remove",
                 skin.dim(),
             )));
         }
