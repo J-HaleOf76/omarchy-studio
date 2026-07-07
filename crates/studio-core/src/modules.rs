@@ -14,6 +14,7 @@
 //! | `wallhaven` | FR2.4 | 04 §6 | v0.6 |
 //! | `wizard` | FR2.5 | 04 §7 | v0.6 |
 //! | `battery` | community ask | — | v0.6 |
+//! | [`update`] | community ask | — | v0.7 |
 
 pub mod animations;
 pub mod battery;
@@ -27,6 +28,7 @@ pub mod mako;
 pub mod swayosd;
 pub mod themes;
 pub mod toggles;
+pub mod update;
 pub mod wallhaven;
 pub mod wallpapers;
 pub mod waybar;

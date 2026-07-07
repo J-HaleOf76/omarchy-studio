@@ -1,0 +1,36 @@
+# Tag builds: push a `v*` tag and this publishes a GitHub release carrying
+# the binary the self-updater (modules/update.rs) looks for. The asset name
+# must stay `omarchy-studio-linux-x86_64` — update::ASSET matches on it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build + publish binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (pinned, matches CI)
+        uses: dtolnay/rust-toolchain@1.96.1
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Stage asset
+        run: cp target/release/omarchy-studio omarchy-studio-linux-x86_64
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: omarchy-studio-linux-x86_64
+          generate_release_notes: true

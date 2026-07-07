@@ -40,6 +40,7 @@ fn main() {
         ["lock", rest @ ..] => lock(rest),
         ["wallpaper", rest @ ..] => wallpaper(rest),
         ["battery", rest @ ..] => battery(rest),
+        ["update", rest @ ..] => update(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1468,6 +1469,72 @@ fn battery(args: &[&str]) -> i32 {
             eprintln!("usage: omarchy-studio battery [status] | limit <start> <end> [--persist]");
             2
         }
+    }
+}
+
+// ── update ──────────────────────────────────────────────────────────────────
+
+fn update(args: &[&str]) -> i32 {
+    use studio_core::modules::update as upd;
+    let check_only = args.contains(&"--check");
+    let fetch = upd::HttpFetch::new();
+    let release = match upd::check(&fetch, upd::CURRENT) {
+        Ok(None) => {
+            println!("up to date (v{})", upd::CURRENT);
+            return 0;
+        }
+        Ok(Some(r)) => r,
+        Err(studio_core::StudioError::External { detail, .. }) => {
+            eprintln!("update check failed: {detail}");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("update check failed: {e:?}");
+            return 1;
+        }
+    };
+    println!("update available: v{} → v{}", upd::CURRENT, release.version);
+    if let Some(line) = release.notes.lines().find(|l| !l.trim().is_empty()) {
+        println!("  {}", line.trim());
+    }
+    if check_only {
+        println!("run `omarchy-studio update` to install it");
+        return 0;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("cannot resolve the running binary's path");
+        return 1;
+    };
+    match upd::install_kind(&RealRunner, &exe) {
+        upd::InstallKind::Packaged { package } => {
+            println!("this binary is owned by the `{package}` package — update it with pacman/your AUR helper");
+            0
+        }
+        upd::InstallKind::Unwritable(path) => {
+            eprintln!(
+                "{} isn't writable — re-run with enough permissions or reinstall",
+                path.display()
+            );
+            1
+        }
+        upd::InstallKind::SelfManaged(path) => match upd::apply(&fetch, &release, &path) {
+            Ok(()) => {
+                println!(
+                    "updated: {} is now v{} (restart omarchy-studio to run it)",
+                    path.display(),
+                    release.version
+                );
+                0
+            }
+            Err(studio_core::StudioError::External { detail, .. }) => {
+                eprintln!("update failed: {detail}");
+                1
+            }
+            Err(e) => {
+                eprintln!("update failed: {e:?}");
+                1
+            }
+        },
     }
 }
 

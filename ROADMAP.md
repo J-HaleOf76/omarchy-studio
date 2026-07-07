@@ -72,7 +72,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 
 Sourced from user feedback on the announcement threads.
 
-- [ ] 0.7.1 Auto-update: release check on launch + `update` CLI verb — download, verify, swap binary, restart; detects pacman/AUR-owned installs and defers to the package manager there
+- [x] 0.7.1 Auto-update: release check on launch + `update` CLI verb — download, verify, swap binary, restart; detects pacman/AUR-owned installs and defers to the package manager there
 - [ ] 0.7.2 TUI theme sync: propagate the active theme's palette to TUIs Omarchy doesn't theme (lazygit, yazi, fzf, bat, zellij, k9s…) — per-tool generators off `colors.toml`, opt-in per tool, re-asserted by the `theme-set` hook
 - [ ] 0.7.3 Apps & services manager: list installed apps/web-apps/services, remove them together with their launcher shortcuts (.desktop entries) and leftover config; systemd user/system unit disable with preview
 - [ ] 0.7.4 Video walkthrough: scripted asciinema/screen capture of an install-to-riced session, linked from README + website

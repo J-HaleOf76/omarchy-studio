@@ -30,6 +30,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **wallhaven** | Search wallhaven.cc from the CLI with color-match ("walls like my accent"), ratio and toplist filters; download straight into your backgrounds | v0.6 |
 | **Integrations** | Dependency health + companion-tool detection (Aether, Omarchist, matugen, hyprmon) with launch actions; "Open in Aether" appears in the wallpaper browser when installed | v0.6 |
 | **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
+| **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
 
@@ -60,6 +61,23 @@ Recommended — install the update-survival hooks so Studio's changes live throu
 
 ```bash
 omarchy-studio hooks install          # undo with: omarchy-studio hooks remove
+```
+
+## Updating
+
+Studio keeps itself current. On launch the TUI checks GitHub for a newer release (once a day, off-thread, silent when offline); when one exists the keybar shows **`U` update!** — press it and Studio downloads the release binary, swaps it in place, and restarts itself. The same flow is scriptable:
+
+```bash
+omarchy-studio update           # check + install + tell you to restart
+omarchy-studio update --check   # just report
+```
+
+If the binary is owned by a pacman package (AUR install), Studio never touches it — it tells you to update through your package manager instead. Two knobs in `~/.config/omarchy-studio/config.toml`:
+
+```toml
+[update]
+check = false   # disable the launch check entirely
+auto = true     # swap + restart without waiting for U
 ```
 
 ## Quick start — the TUI
@@ -139,6 +157,9 @@ omarchy-studio battery limit <start> <stop> [--persist]   # --persist under sudo
 
 # Update-survival hooks
 omarchy-studio hooks install | remove | status
+
+# Self-update (defers to pacman for packaged installs)
+omarchy-studio update [--check]
 
 # Health check (--quiet: terse drift report, exit 1 when something needs a look)
 omarchy-studio doctor [--deps] [--quiet]

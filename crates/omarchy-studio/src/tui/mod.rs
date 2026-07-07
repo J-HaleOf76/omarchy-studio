@@ -37,6 +37,7 @@ use ratatui::Frame;
 
 use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::modules::themes::ThemeStore;
+use studio_core::modules::update;
 use studio_core::omarchy::{cmds, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
@@ -165,6 +166,18 @@ struct App {
     palette: Option<CommandPalette>,
     help: bool,
     toast: Option<Toast>,
+    /// Newer release found by the launch check — arms the `U` chord.
+    update: Option<update::Release>,
+    /// The launch check runs on its own thread; the event loop polls this
+    /// until it answers (then goes back to blocking reads).
+    update_rx: Option<std::sync::mpsc::Receiver<Option<update::Release>>>,
+    /// `[update] auto = true`: swap + restart without waiting for `U`.
+    update_auto: bool,
+    /// Running binary's path, captured before any swap can rename over it
+    /// (afterwards `/proc/self/exe` reads "… (deleted)").
+    exe: Option<std::path::PathBuf>,
+    /// Exec `exe` after the terminal is restored (set by a completed update).
+    restart: bool,
     quit: bool,
 }
 
@@ -199,6 +212,28 @@ impl App {
             studio_core::omarchy::Capabilities::probe(&paths, &RealRunner).video_wallpapers,
         );
         wallpapers.context_tools = integrations.context_actions("wallpapers");
+        // Launch update check, off-thread so a slow network never delays the
+        // first draw. The thread touches only the network and the state-dir
+        // stamp — never stdin (see ImageCell::probe for why that matters).
+        let update_cfg = update::load_config();
+        let update_rx = if update_cfg.check {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let _ = tx.send(update::startup_check(
+                    &update::HttpFetch::new(),
+                    &studio_core::studio_state_dir(),
+                    update::CURRENT,
+                    now,
+                ));
+            });
+            Some(rx)
+        } else {
+            None
+        };
         Self {
             paths,
             skin,
@@ -220,7 +255,82 @@ impl App {
             palette: None,
             help: false,
             toast: None,
+            update: None,
+            update_rx,
+            update_auto: update_cfg.auto,
+            exe: std::env::current_exe().ok(),
+            restart: false,
             quit: false,
+        }
+    }
+
+    /// The launch check answered. `None` covers up-to-date, offline, and
+    /// check-not-due alike — silence, not a toast.
+    fn update_arrived(&mut self, found: Option<update::Release>) {
+        self.update_rx = None;
+        let Some(release) = found else { return };
+        let version = release.version.clone();
+        self.update = Some(release);
+        if self.update_auto {
+            self.update_apply();
+        } else {
+            self.toast = Some(Toast {
+                text: format!("v{version} is out — press U to update & restart"),
+                ok: true,
+            });
+        }
+    }
+
+    /// `U` (or `[update] auto`): swap the binary and restart, or explain
+    /// why we won't touch it.
+    fn update_apply(&mut self) {
+        let Some(release) = self.update.clone() else {
+            return;
+        };
+        let Some(exe) = self.exe.clone() else {
+            self.toast = Some(Toast {
+                text: "cannot resolve the running binary's path".into(),
+                ok: false,
+            });
+            return;
+        };
+        match update::install_kind(&RealRunner, &exe) {
+            update::InstallKind::Packaged { package } => {
+                self.toast = Some(Toast {
+                    text: format!(
+                        "v{} is out — this install is owned by `{package}`, update it via pacman",
+                        release.version
+                    ),
+                    ok: true,
+                });
+            }
+            update::InstallKind::Unwritable(path) => {
+                self.toast = Some(Toast {
+                    text: format!(
+                        "{} isn't writable — run `omarchy-studio update` with enough permissions",
+                        path.display()
+                    ),
+                    ok: false,
+                });
+            }
+            update::InstallKind::SelfManaged(path) => {
+                match update::apply(&update::HttpFetch::new(), &release, &path) {
+                    Ok(()) => {
+                        self.restart = true;
+                        self.quit = true;
+                    }
+                    Err(e) => {
+                        let msg = match e {
+                            studio_core::StudioError::External { detail, .. } => detail,
+                            other => format!("{other:?}"),
+                        };
+                        self.toast = Some(Toast {
+                            text: format!("update failed: {msg}"),
+                            ok: false,
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -287,6 +397,10 @@ impl App {
                 }
                 KeyCode::Char('0') => {
                     self.jump(9);
+                    return;
+                }
+                KeyCode::Char('U') if self.update.is_some() => {
+                    self.update_apply();
                     return;
                 }
                 _ => {}
@@ -1530,7 +1644,11 @@ impl App {
             }
         }
         if show_globals {
-            let globals: [(&str, &str); 3] = [("/", "search"), ("?", "help"), ("q", "quit")];
+            let mut globals: Vec<(&str, &str)> =
+                vec![("/", "search"), ("?", "help"), ("q", "quit")];
+            if self.update.is_some() {
+                globals.insert(0, ("U", "update!"));
+            }
             let right_len: usize = globals
                 .iter()
                 .map(|(k, l)| k.len() + l.len() + 3)
@@ -1571,6 +1689,7 @@ impl App {
             ("enter", "apply / activate"),
             ("f", "fork the selected theme"),
             ("esc", "back to Themes, or quit"),
+            ("U", "install a waiting update & restart"),
             ("q", "quit"),
             ("?", "this help"),
         ];
@@ -1789,6 +1908,30 @@ pub fn run() -> i32 {
         if let Err(e) = terminal.draw(|f| app.draw(f)) {
             break Err(e);
         }
+        // While the launch update-check is in flight, poll so its answer can
+        // surface without a keypress; afterwards this is a blocking read
+        // again (zero idle wakeups).
+        if app.update_rx.is_some() {
+            match event::poll(std::time::Duration::from_millis(250)) {
+                Ok(ready) => {
+                    let polled = app.update_rx.as_ref().map(|rx| rx.try_recv());
+                    match polled {
+                        Some(Ok(found)) => app.update_arrived(found),
+                        Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                            app.update_rx = None
+                        }
+                        _ => {}
+                    }
+                    if app.quit {
+                        break Ok(());
+                    }
+                    if !ready {
+                        continue;
+                    }
+                }
+                Err(e) => break Err(e),
+            }
+        }
         match event::read() {
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
                 // Ctrl-C always exits, even mid text-entry.
@@ -1812,6 +1955,17 @@ pub fn run() -> i32 {
     }
     ratatui::restore();
     match result {
+        // An update swapped the binary at our path: replace this process
+        // with the new build, same arguments.
+        Ok(()) if app.restart => {
+            use std::os::unix::process::CommandExt;
+            let exe = app.exe.expect("restart is only set after a swap at exe");
+            let err = std::process::Command::new(&exe)
+                .args(std::env::args_os().skip(1))
+                .exec();
+            eprintln!("restart failed: {err} — start {} manually", exe.display());
+            1
+        }
         Ok(()) => 0,
         Err(e) => {
             eprintln!("terminal error: {e}");
