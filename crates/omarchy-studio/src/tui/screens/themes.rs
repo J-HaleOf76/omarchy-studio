@@ -1,16 +1,35 @@
 //! Themes screen (spec 07 §8, PRD M1): browse with swatch strips, apply, fork.
 //! First real Studio screen — the template the others follow.
+//!
+//! Wide terminals get a live preview pane: the selected theme's wallpaper
+//! plus a mock terminal window drawn entirely in that theme's palette — how
+//! the desktop would *feel*, before applying anything.
+
+use std::path::PathBuf;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
 use studio_core::modules::themes::{Theme, ThemeOrigin, ThemeStore, PALETTE_KEYS};
 use studio_core::omarchy::OmarchyPaths;
 
+use crate::tui::imagecell::ImageCell;
 use crate::tui::theme::Skin;
+
+/// Everything the preview pane needs, loaded once per theme (not per frame).
+struct Preview {
+    bg: Color,
+    fg: Color,
+    accent: Color,
+    sel_bg: Color,
+    ansi: Vec<Color>,
+    wallpaper: Option<PathBuf>,
+    light: bool,
+    bg_hex: String,
+}
 
 /// A pre-rendered browser row (swatches loaded once, not per frame).
 struct Row {
@@ -19,6 +38,7 @@ struct Row {
     origin: ThemeOrigin,
     light: bool,
     swatch: Vec<Color>,
+    preview: Option<Preview>,
 }
 
 /// What the screen wants the app to do (screens stay pure of side effects).
@@ -149,7 +169,7 @@ impl ThemesScreen {
         }
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin) {
+    pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin, images: &mut ImageCell) {
         let rows = self.visible();
         if rows.is_empty() {
             let msg = if self.rows.is_empty() {
@@ -161,17 +181,149 @@ impl ThemesScreen {
             return;
         }
 
-        // One line per theme: marker, swatch strip, name, badges.
+        // Wide terminals: list left, live theme preview right.
+        let (list_area, preview_area) = if area.width >= 82 {
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(44), Constraint::Min(30)])
+                .split(area);
+            (cols[0], Some(cols[1]))
+        } else {
+            (area, None)
+        };
+
+        // Scroll the viewport so the selection always stays on screen.
+        let h = list_area.height as usize;
+        let offset = (self.selected + 1).saturating_sub(h);
         let lines: Vec<Line> = rows
             .iter()
             .enumerate()
+            .skip(offset)
+            .take(h.max(1))
             .map(|(i, r)| self.render_row(r, i == self.selected, skin))
             .collect();
-        f.render_widget(Paragraph::new(lines), area);
+        f.render_widget(Paragraph::new(lines), list_area);
+
+        if let Some(pane) = preview_area {
+            self.render_preview(f, pane, skin, images);
+        }
 
         if let Some(buf) = &self.fork_input {
             self.render_fork_modal(f, area, buf, skin);
         }
+    }
+
+    /// The selected theme, mocked up in its own colors: wallpaper thumb on
+    /// top (when the terminal can draw it), a fake terminal window below,
+    /// and the full ANSI strip — Omarchy's picker idea, in cells.
+    fn render_preview(&self, f: &mut Frame, area: Rect, skin: &Skin, images: &mut ImageCell) {
+        let Some(row) = self.visible().get(self.selected).copied() else {
+            return;
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(skin.border())
+            .title(Span::styled(format!(" {} ", row.pretty), skin.dim()));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let Some(p) = &row.preview else {
+            f.render_widget(
+                Paragraph::new("this theme has no colors.toml to preview").style(skin.dim()),
+                inner,
+            );
+            return;
+        };
+
+        // wallpaper thumb above the mock when there is room for both
+        let (wall_area, mock_area) = match &p.wallpaper {
+            Some(_) if inner.height >= 15 => {
+                let split = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(inner.height.saturating_sub(11)),
+                        Constraint::Length(11),
+                    ])
+                    .split(inner);
+                (Some(split[0]), split[1])
+            }
+            _ => (None, inner),
+        };
+        if let (Some(wa), Some(wp)) = (wall_area, &p.wallpaper) {
+            images.render(f, wa, wp);
+        }
+
+        // mock terminal window, every cell in the theme's palette
+        let on_bg = |c: Color| Style::default().fg(c).bg(p.bg);
+        let w = (mock_area.width as usize).saturating_sub(2).clamp(10, 34);
+        let bar = "─".repeat(w.saturating_sub(2));
+        // room between the two │ borders
+        let iw = w.saturating_sub(2);
+        let pad = move |s: &str| format!("{s:<iw$}");
+        let framed = |spans: Vec<Span<'static>>, p: &Preview| {
+            let mut v = vec![Span::styled("│", on_bg(p.accent))];
+            v.extend(spans);
+            v.push(Span::styled("│", on_bg(p.accent)));
+            Line::from(v)
+        };
+        let color = |i: usize, p: &Preview| p.ansi.get(i).copied().unwrap_or(p.fg);
+        let mut lines: Vec<Line> = vec![
+            Line::from(Span::styled(format!("╭{bar}╮"), on_bg(p.accent))),
+            framed(
+                vec![
+                    Span::styled(" ❯ ".to_string(), on_bg(p.accent)),
+                    Span::styled(
+                        format!("{:<jw$}", "omarchy-studio", jw = iw.saturating_sub(3)),
+                        on_bg(p.fg),
+                    ),
+                ],
+                p,
+            ),
+            framed(
+                vec![Span::styled(
+                    pad(" themes  waybar  hypr"),
+                    on_bg(color(4, p)),
+                )],
+                p,
+            ),
+            framed(
+                vec![Span::styled(pad(" ✓ theme applied"), on_bg(color(2, p)))],
+                p,
+            ),
+            framed(
+                vec![Span::styled(pad(" ! 2 warnings"), on_bg(color(3, p)))],
+                p,
+            ),
+            framed(
+                vec![Span::styled(pad(" ✗ 1 conflict"), on_bg(color(1, p)))],
+                p,
+            ),
+            framed(
+                vec![Span::styled(
+                    pad(" selected line"),
+                    Style::default().fg(p.fg).bg(p.sel_bg),
+                )],
+                p,
+            ),
+            Line::from(Span::styled(format!("╰{bar}╯"), on_bg(p.accent))),
+        ];
+        let mut strip: Vec<Span> = vec![Span::styled(" ", on_bg(p.fg))];
+        for c in &p.ansi {
+            strip.push(Span::styled("██", Style::default().fg(*c).bg(p.bg)));
+        }
+        lines.push(Line::from(strip));
+        lines.push(Line::from(Span::styled(
+            format!(
+                " {} · {}",
+                if p.light { "light ☀" } else { "dark" },
+                p.bg_hex
+            ),
+            on_bg(p.fg),
+        )));
+        f.render_widget(
+            Paragraph::new(lines).style(Style::default().bg(p.bg)),
+            mock_area,
+        );
     }
 
     fn render_row<'a>(&self, r: &'a Row, selected: bool, skin: &Skin) -> Line<'a> {
@@ -237,10 +389,10 @@ impl ThemesScreen {
 }
 
 fn row_of(t: &Theme) -> Row {
+    let palette = t.palette().ok();
     // Swatch = accent + background + a spread of the ANSI colors, when present.
-    let swatch = t
-        .palette()
-        .ok()
+    let swatch = palette
+        .as_ref()
         .map(|p| {
             [
                 "accent",
@@ -260,11 +412,47 @@ fn row_of(t: &Theme) -> Row {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| vec![Color::DarkGray; 3]);
     let _ = PALETTE_KEYS; // keys referenced for future full-swatch mode
+    let preview = palette.as_ref().and_then(|p| {
+        let rgb = |k: &str| p.get(k).map(|c| Color::Rgb(c.r, c.g, c.b));
+        let bg = rgb("background")?;
+        let fg = rgb("foreground")?;
+        Some(Preview {
+            bg,
+            fg,
+            accent: rgb("accent").unwrap_or(fg),
+            sel_bg: rgb("selection_background").unwrap_or(bg),
+            ansi: (0..16).filter_map(|i| rgb(&format!("color{i}"))).collect(),
+            wallpaper: first_background(t),
+            light: t.light(),
+            bg_hex: p.get("background").map(|c| c.hex()).unwrap_or_default(),
+        })
+    });
     Row {
         slug: t.slug.clone(),
         pretty: t.pretty.clone(),
         origin: t.origin,
         light: t.light(),
         swatch,
+        preview,
     }
+}
+
+/// First still image in the theme's `backgrounds/` (merged view) — the pane's
+/// "what would my desktop look like" half.
+fn first_background(t: &Theme) -> Option<PathBuf> {
+    let dir = t.file("backgrounds")?;
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let ext = p
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp")
+        })
+        .collect();
+    files.sort();
+    files.into_iter().next()
 }

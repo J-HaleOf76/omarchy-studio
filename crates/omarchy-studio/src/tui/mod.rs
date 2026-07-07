@@ -1383,11 +1383,11 @@ impl App {
                 .constraints([Constraint::Length(logo::HEIGHT), Constraint::Min(1)])
                 .split(area);
             logo::render(f, rows[0], &self.skin);
-            self.themes.render(f, rows[1], &self.skin);
+            self.themes.render(f, rows[1], &self.skin, &mut self.images);
             return;
         }
         match self.screen {
-            Screen::Themes => self.themes.render(f, area, &self.skin),
+            Screen::Themes => self.themes.render(f, area, &self.skin, &mut self.images),
             Screen::Keybinds => self.keybinds.render(f, area, &self.skin),
             Screen::LookFeel => self.looknfeel.render(f, area, &self.skin),
             Screen::Animations => self.animations.render(f, area, &self.skin),
