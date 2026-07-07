@@ -280,6 +280,65 @@ fn theme(args: &[&str]) -> i32 {
         // Preview a palette extracted from an image (spec 04 §4). The
         // theme-from-wallpaper wizard (0.6.5) builds on this; here it prints
         // the colors.toml so the result is scriptable today.
+        ["new", name, rest @ ..] if rest.first() == Some(&"--from-image") => {
+            use studio_core::modules::extraction::{extract_image, Bias, Mode};
+            use studio_core::modules::wizard::materialize;
+            let Some(image) = rest.get(1) else {
+                eprintln!(
+                    "usage: theme new <name> --from-image <path> [--mode m] [--bias b] [--apply]"
+                );
+                return 2;
+            };
+            let flag = |k: &str| {
+                rest.iter()
+                    .position(|a| *a == k)
+                    .and_then(|i| rest.get(i + 1))
+            };
+            let mode = flag("--mode")
+                .and_then(|s| Mode::parse(s))
+                .unwrap_or(Mode::Normal);
+            let bias = flag("--bias")
+                .and_then(|s| Bias::parse(s))
+                .unwrap_or(Bias::Auto);
+            let image = std::path::Path::new(image);
+            let ex = match extract_image(image, mode, bias) {
+                Ok(ex) => ex,
+                Err(e) => {
+                    eprintln!("extraction failed: {e:?}");
+                    return 1;
+                }
+            };
+            match materialize(&paths, name, image, &ex) {
+                Ok(dir) => {
+                    let slug = dir.file_name().unwrap_or_default().to_string_lossy();
+                    println!(
+                        "theme `{slug}` created at {} ({} · {})",
+                        dir.display(),
+                        mode.label(),
+                        if ex.light { "light" } else { "dark" }
+                    );
+                    if rest.contains(&"--apply") {
+                        let out = RealRunner.run(&cmds::theme_set(&slug));
+                        match out {
+                            Ok(o) if o.ok() => println!("applied."),
+                            _ => {
+                                eprintln!(
+                                    "created, but omarchy-theme-set failed — apply from the TUI"
+                                );
+                                return 1;
+                            }
+                        }
+                    } else {
+                        println!("apply with: omarchy-studio theme apply {slug}");
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("could not create the theme: {e:?}");
+                    1
+                }
+            }
+        }
         ["extract", image, rest @ ..] => {
             use studio_core::modules::extraction::{extract_image, Bias, Mode};
             let mode = rest
@@ -308,7 +367,9 @@ fn theme(args: &[&str]) -> i32 {
         }
         _ => {
             eprintln!(
-                "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new> | extract <image> [normal|muted|material] [auto|dark|light]"
+                "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new> \
+                 | new <name> --from-image <path> [--mode normal|muted|material] [--bias auto|dark|light] [--apply] \
+                 | extract <image> [normal|muted|material] [auto|dark|light]"
             );
             2
         }
@@ -1413,6 +1474,9 @@ fn battery(args: &[&str]) -> i32 {
 fn wallpaper(args: &[&str]) -> i32 {
     use studio_core::modules::wallpapers::Wallpapers;
     let Some(paths) = omarchy() else { return 4 };
+    if let Some(("wallhaven", rest)) = args.split_first().map(|(a, r)| (*a, r)) {
+        return wallhaven(&paths, rest);
+    }
     let w = Wallpapers::load(&paths);
     match args {
         ["list"] => {
@@ -1515,6 +1579,99 @@ fn wallpaper(args: &[&str]) -> i32 {
 }
 
 // ── update-survival hooks (spec 02 §4, §6) ──────────────────────────────────
+
+/// `wallpaper wallhaven search <query> [--color <hex>] [--ratio <r>] [--top]
+/// [--page N] [--download <n>]` — anonymous wallhaven.cc search (SFW; an API
+/// key in ~/.config/omarchy-studio/config.toml unlocks more), optionally
+/// pulling one result straight into backgrounds/<theme>/ (spec 04 §6).
+fn wallhaven(paths: &OmarchyPaths, args: &[&str]) -> i32 {
+    use studio_core::modules::wallhaven::{nearest_color, Client, Query, Sorting};
+    let Some(("search", rest)) = args.split_first().map(|(a, r)| (*a, r)) else {
+        eprintln!(
+            "usage: omarchy-studio wallpaper wallhaven search <query> \
+             [--color <hex>] [--ratio 16x9] [--top] [--page N] [--download <n>]"
+        );
+        return 2;
+    };
+    let Some(q) = rest.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("what should I search for? e.g. `wallpaper wallhaven search \"jade city\"`");
+        return 2;
+    };
+    let flag = |k: &str| {
+        rest.iter()
+            .position(|a| *a == k)
+            .and_then(|i| rest.get(i + 1))
+    };
+    let mut query = Query {
+        q: q.to_string(),
+        ..Query::default()
+    };
+    if rest.contains(&"--top") {
+        query.sorting = Sorting::Toplist;
+    }
+    if let Some(r) = flag("--ratio") {
+        query.ratios = Some(r.to_string());
+    }
+    if let Some(c) = flag("--color") {
+        match nearest_color(c) {
+            Some(picker) => query.color = Some(picker.to_string()),
+            None => {
+                eprintln!("`{c}` is not a color — expected hex like #7aa2f7");
+                return 2;
+            }
+        }
+    }
+    if let Some(p) = flag("--page").and_then(|p| p.parse().ok()) {
+        query.page = p;
+    }
+
+    let mut client = Client::online();
+    let page = match client.search(&query) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e:?}");
+            return 1;
+        }
+    };
+    if page.data.is_empty() {
+        println!("no results for `{}`", query.q);
+        return 0;
+    }
+    for (i, wp) in page.data.iter().enumerate() {
+        println!("{:>2}  {}  {:<11} {}", i + 1, wp.id, wp.resolution, wp.url);
+    }
+    println!(
+        "page {}/{} · {} total · --page N for more · --download <n> to fetch one",
+        page.meta.current_page, page.meta.last_page, page.meta.total
+    );
+
+    if let Some(n) = flag("--download").and_then(|n| n.parse::<usize>().ok()) {
+        let Some(wp) = page.data.get(n.saturating_sub(1)) else {
+            eprintln!("--download {n} is out of range (1–{})", page.data.len());
+            return 2;
+        };
+        let theme = paths.current_theme_name().unwrap_or_default();
+        let dir = paths.config.join(format!("backgrounds/{theme}"));
+        match client.download(wp, &dir) {
+            Ok(dest) => {
+                println!("downloaded → {}", dest.display());
+                println!(
+                    "set it with: omarchy-studio wallpaper set {}",
+                    wp.file_name()
+                );
+                println!(
+                    "or craft a theme: omarchy-studio theme new <name> --from-image {}",
+                    dest.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("{e:?}");
+                return 1;
+            }
+        }
+    }
+    0
+}
 
 fn hooks_cmd(args: &[&str]) -> i32 {
     use studio_core::hooks;
