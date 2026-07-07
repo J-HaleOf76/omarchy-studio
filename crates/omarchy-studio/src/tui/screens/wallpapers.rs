@@ -16,6 +16,7 @@ use ratatui::Frame;
 use studio_core::modules::wallpapers::{Entry, Kind, Wallpapers};
 use studio_core::omarchy::OmarchyPaths;
 
+use crate::tui::imagecell::ImageCell;
 use crate::tui::theme::Skin;
 
 pub enum WallpaperAction {
@@ -28,6 +29,8 @@ pub enum WallpaperAction {
     Add(PathBuf),
     /// Delete this user-added entry.
     Remove(Entry),
+    /// Open in an external viewer (imv, mpv for videos).
+    Open(Entry),
 }
 
 pub struct WallpapersScreen {
@@ -104,6 +107,11 @@ impl WallpapersScreen {
                 }
             }
             KeyCode::Char('n') => return WallpaperAction::Next,
+            KeyCode::Char('o') => {
+                if let Some(e) = self.selected_entry() {
+                    return WallpaperAction::Open(e.clone());
+                }
+            }
             KeyCode::Char('a') => self.input = Some(String::new()),
             KeyCode::Char('x') => {
                 if let Some(e) = self.selected_entry() {
@@ -117,11 +125,22 @@ impl WallpapersScreen {
         WallpaperAction::None
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin) {
+    pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin, images: &mut ImageCell) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(1), Constraint::Length(3)])
             .split(area);
+
+        // Wide terminals get a live preview pane beside the list.
+        let (list_area, preview_area) = if area.width >= 80 {
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(58), Constraint::Min(20)])
+                .split(rows[0]);
+            (cols[0], Some(cols[1]))
+        } else {
+            (rows[0], None)
+        };
 
         if self.w.entries.is_empty() {
             f.render_widget(
@@ -129,7 +148,7 @@ impl WallpapersScreen {
                     "No wallpapers found for `{}`.\nAdd one with a (or `omarchy-studio wallpaper add <file>`).",
                     self.w.theme
                 )),
-                rows[0],
+                list_area,
             );
         } else {
             let items: Vec<ListItem> = self
@@ -169,7 +188,11 @@ impl WallpapersScreen {
                     }
                 })
                 .collect();
-            f.render_widget(List::new(items), rows[0]);
+            f.render_widget(List::new(items), list_area);
+        }
+
+        if let Some(pane) = preview_area {
+            self.render_preview(f, pane, skin, images);
         }
 
         let mut footer = vec![Line::from(vec![Span::styled(
@@ -183,7 +206,7 @@ impl WallpapersScreen {
             )));
         } else {
             footer.push(Line::from(Span::styled(
-                "enter set · n next · a add file · x remove (your files)",
+                "enter set · n next · o open · a add file · x remove (your files)",
                 skin.dim(),
             )));
         }
@@ -191,6 +214,47 @@ impl WallpapersScreen {
 
         if let Some(buf) = &self.input {
             self.render_input(f, area, skin, buf);
+        }
+    }
+
+    /// Right-hand pane: the selected wallpaper, live, in whatever the
+    /// terminal can do (kitty/sixel/half-blocks) — text otherwise, with the
+    /// `o` escape hatch always spelled out (spec 06 §4: never strand).
+    fn render_preview(&self, f: &mut Frame, area: Rect, skin: &Skin, images: &mut ImageCell) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(skin.border())
+            .title(Span::styled(" preview ", skin.dim()));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let Some(e) = self.selected_entry() else {
+            return;
+        };
+        let fallback = |f: &mut Frame, text: String| {
+            f.render_widget(
+                Paragraph::new(text)
+                    .style(skin.dim())
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                inner,
+            );
+        };
+        match e.kind {
+            Kind::Video => fallback(
+                f,
+                format!("{}\n\nvideo — press o to play it in mpv", e.name()),
+            ),
+            _ => {
+                if !images.render(f, inner, &e.path) {
+                    fallback(
+                        f,
+                        format!(
+                            "{}\n\ncould not decode — press o to open it in imv",
+                            e.name()
+                        ),
+                    );
+                }
+            }
         }
     }
 

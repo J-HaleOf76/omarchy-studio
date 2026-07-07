@@ -19,3 +19,5 @@ path = "src/main.rs"
 [dependencies]
 studio-core = { workspace = true }
 ratatui = { workspace = true }
+image = { workspace = true }
+ratatui-image = { workspace = true }

@@ -38,6 +38,9 @@ pub struct DoctorScreen {
     drift: Vec<PathBuf>,
     clobbers: Vec<PathBuf>,
     store_ok: bool,
+    /// TUI-side probe result (kitty/sixel/half-blocks) — set by the App,
+    /// which owns the [`crate::tui::imagecell::ImageCell`].
+    graphics: Option<String>,
 }
 
 impl DoctorScreen {
@@ -65,11 +68,18 @@ impl DoctorScreen {
             drift,
             clobbers,
             store_ok,
+            graphics: None,
         }
     }
 
     pub fn reload(&mut self, paths: &OmarchyPaths, runner: &dyn CommandRunner) {
+        let graphics = self.graphics.take();
         *self = Self::load(paths, runner);
+        self.graphics = graphics;
+    }
+
+    pub fn set_graphics(&mut self, label: &str) {
+        self.graphics = Some(label.to_string());
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> DoctorAction {
@@ -107,6 +117,9 @@ impl DoctorScreen {
         };
         lines.push(fact("hyprland", hypr, skin));
         lines.push(fact("theme", self.theme.clone(), skin));
+        if let Some(g) = &self.graphics {
+            lines.push(fact("previews", g.clone(), skin));
+        }
         lines.push(Line::from(""));
 
         lines.push(Line::from(Span::styled("  Capabilities", skin.dim())));

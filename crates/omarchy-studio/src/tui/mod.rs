@@ -7,6 +7,7 @@
 //! end-to-end without pretending features exist.
 
 mod chord;
+mod imagecell;
 mod logo;
 mod theme;
 mod screens {
@@ -141,6 +142,8 @@ struct App {
     lockidle: LockIdleScreen,
     doctor: DoctorScreen,
     wallpapers: WallpapersScreen,
+    /// Shared terminal-graphics preview cell (probed once at startup).
+    images: imagecell::ImageCell,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -152,6 +155,10 @@ struct App {
 
 impl App {
     fn new(paths: OmarchyPaths) -> Self {
+        // Probe the terminal's graphics protocol first: the probe reads the
+        // tty for the query response and would eat any keys typed while the
+        // (slower) screen loads below run.
+        let images = imagecell::ImageCell::probe();
         let skin = Skin::from_current(&paths);
         let themes = ThemesScreen::load(&paths);
         // If a previous session died mid-preview, its live `hyprctl keyword`
@@ -168,7 +175,8 @@ impl App {
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
-        let doctor = DoctorScreen::load(&paths, &RealRunner);
+        let mut doctor = DoctorScreen::load(&paths, &RealRunner);
+        doctor.set_graphics(images.protocol_label());
         let wallpapers = WallpapersScreen::load(
             &paths,
             studio_core::omarchy::Capabilities::probe(&paths, &RealRunner).video_wallpapers,
@@ -186,6 +194,7 @@ impl App {
             lockidle,
             doctor,
             wallpapers,
+            images,
             editor: None,
             palette: None,
             help: false,
@@ -373,6 +382,7 @@ impl App {
                 WallpaperAction::Next => self.wp_next(),
                 WallpaperAction::Add(path) => self.wp_add(&path),
                 WallpaperAction::Remove(entry) => self.wp_remove(&entry),
+                WallpaperAction::Open(entry) => self.wp_open(&entry),
             },
             Screen::Doctor => match self.doctor.handle(key) {
                 DoctorAction::None => {}
@@ -607,6 +617,41 @@ impl App {
             Err(e) => {
                 self.toast = Some(Toast {
                     text: format!("couldn't set wallpaper: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Hand the file to an external viewer, detached: imv for stills/gifs
+    /// (present on Omarchy), mpv for videos. The fallback path when the
+    /// terminal can't draw images — and a full-size look even when it can.
+    fn wp_open(&mut self, entry: &studio_core::modules::wallpapers::Entry) {
+        use studio_core::modules::wallpapers::Kind;
+        let viewer = match entry.kind {
+            Kind::Video => "mpv",
+            _ => "imv",
+        };
+        match std::process::Command::new(viewer)
+            .arg(&entry.path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                // reap the viewer when it closes so it never lingers defunct
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                self.toast = Some(Toast {
+                    text: format!("Opened {} in {viewer}", entry.name()),
+                    ok: true,
+                });
+            }
+            Err(_) => {
+                self.toast = Some(Toast {
+                    text: format!("{viewer} is not installed — sudo pacman -S {viewer}"),
                     ok: false,
                 });
             }
@@ -1210,7 +1255,9 @@ impl App {
             Screen::Waybar => self.waybar.render(f, area, &self.skin),
             Screen::Notifications => self.notifications.render(f, area, &self.skin),
             Screen::LockIdle => self.lockidle.render(f, area, &self.skin),
-            Screen::Wallpapers => self.wallpapers.render(f, area, &self.skin),
+            Screen::Wallpapers => self
+                .wallpapers
+                .render(f, area, &self.skin, &mut self.images),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
         }
