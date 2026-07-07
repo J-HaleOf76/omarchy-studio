@@ -68,6 +68,15 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.6.6 Integrations screen (tool registry, contextual actions) [06 §5]
 - [x] 0.6.7 CLI `wallpaper wallhaven search/download`, `theme new --from-image` [08]
 
+## v0.7 — Community asks (~2 wks) — *exit: the tool keeps itself current and themes reach beyond Omarchy's own configs*
+
+Sourced from user feedback on the announcement threads.
+
+- [ ] 0.7.1 Auto-update: release check on launch + `update` CLI verb — download, verify, swap binary, restart; detects pacman/AUR-owned installs and defers to the package manager there
+- [ ] 0.7.2 TUI theme sync: propagate the active theme's palette to TUIs Omarchy doesn't theme (lazygit, yazi, fzf, bat, zellij, k9s…) — per-tool generators off `colors.toml`, opt-in per tool, re-asserted by the `theme-set` hook
+- [ ] 0.7.3 Apps & services manager: list installed apps/web-apps/services, remove them together with their launcher shortcuts (.desktop entries) and leftover config; systemd user/system unit disable with preview
+- [ ] 0.7.4 Video walkthrough: scripted asciinema/screen capture of an install-to-riced session, linked from README + website
+
 ## v1.0 — Polish (~2 wks) — *exit: a stranger installs from AUR and rices start-to-finish*
 
 - [ ] 1.0.1 Profiles (bundle save/switch) — PRD Q8 may cut this
