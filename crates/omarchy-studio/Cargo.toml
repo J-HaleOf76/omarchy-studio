@@ -21,3 +21,4 @@ studio-core = { workspace = true }
 ratatui = { workspace = true }
 image = { workspace = true }
 ratatui-image = { workspace = true }
+serde_json = { workspace = true }   # hyprctl monitors -j (wallhaven `atleast`)

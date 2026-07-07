@@ -76,6 +76,7 @@ Sourced from user feedback on the announcement threads.
 - [ ] 0.7.2 TUI theme sync: propagate the active theme's palette to TUIs Omarchy doesn't theme (lazygit, yazi, fzf, bat, zellij, k9s…) — per-tool generators off `colors.toml`, opt-in per tool, re-asserted by the `theme-set` hook
 - [ ] 0.7.3 Apps & services manager: list installed apps/web-apps/services, remove them together with their launcher shortcuts (.desktop entries) and leftover config; systemd user/system unit disable with preview
 - [ ] 0.7.4 Video walkthrough: scripted asciinema/screen capture of an install-to-riced session, linked from README + website
+- [x] 0.7.5 In-TUI wallhaven browser (`w` in Wallpapers): worker-thread search, sort/ratio/color-match/purity filters, cached thumbnails, download→set/keep/wizard — finishes the spec 04 §6 story 0.6.3 started
 
 ## v1.0 — Polish (~2 wks) — *exit: a stranger installs from AUR and rices start-to-finish*
 

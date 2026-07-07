@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (167 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete and v0.7 (community asks) is underway. Tested against Omarchy 3.8.
+> **Status: alpha.** The modules below are built, tested (174 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete and v0.7 (community asks) is underway. Tested against Omarchy 3.8.
 
 ## Why
 
@@ -27,7 +27,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Wallpapers** | Browse all four background sources (yours / theme / videos) with in-terminal previews (kitty / sixel / half-blocks), set/cycle/add/remove, `o` opens in imv/mpv | v0.6 |
 | **Palette extraction** | Median-cut engine: image → full `colors.toml` (normal / muted / material modes, dark/light bias, WCAG-safe) | v0.6 |
 | **Theme wizard** | `t` on any wallpaper (or `theme new --from-image`): live extraction → named, 100 % standard theme dir with preview.png | v0.6 |
-| **wallhaven** | Search wallhaven.cc from the CLI with color-match ("walls like my accent"), ratio and toplist filters; download straight into your backgrounds | v0.6 |
+| **wallhaven** | Browse wallhaven.cc without leaving the TUI (`w` in Wallpapers): live search, sort/ratio/color-match filters, thumbnail previews, download-and-set or feed straight into the theme wizard — plus the same search on the CLI | v0.6–0.7 |
 | **Integrations** | Dependency health + companion-tool detection (Aether, Omarchist, matugen, hyprmon) with launch actions; "Open in Aether" appears in the wallpaper browser when installed | v0.6 |
 | **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
 | **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
@@ -94,6 +94,7 @@ omarchy-studio          # launch the full-screen cockpit
 | `h` / `l` | adjust the selected value |
 | `Enter` | open a picker (avatar, theme, …) |
 | `t` | (wallpapers) craft a theme from the selected image |
+| `w` | (wallpapers) browse wallhaven.cc — enter sets, `t` themes |
 | `o` | (wallpapers) open in imv / mpv |
 | `s` | save pending edits (snapshotted first) |
 | `U` | install a waiting update & restart |

@@ -31,6 +31,8 @@ pub enum WallpaperAction {
     Remove(Entry),
     /// Open in an external viewer (imv, mpv for videos).
     Open(Entry),
+    /// Browse wallhaven.cc (opens the browser modal).
+    Wallhaven,
     /// Craft a theme from this image (opens the wizard).
     Craft(Entry),
     /// Run a companion tool's contextual action (spec 06 §5).
@@ -139,6 +141,7 @@ impl WallpapersScreen {
                 }
             }
             KeyCode::Char('a') => self.input = Some(String::new()),
+            KeyCode::Char('w') => return WallpaperAction::Wallhaven,
             KeyCode::Char('x') => {
                 if let Some(e) = self.selected_entry() {
                     if e.removable() {
@@ -231,8 +234,9 @@ impl WallpapersScreen {
                 skin.warn(),
             )));
         } else {
-            let mut hint =
-                String::from("enter set · n next · o open · t theme from this · a add · x remove");
+            let mut hint = String::from(
+                "enter set · n next · o open · t theme from this · a add · w wallhaven · x remove",
+            );
             if let Some((label, ..)) = self.context_tools.first() {
                 let short = label.split(" (").next().unwrap_or(label);
                 hint.push_str(&format!(" · A {short}"));

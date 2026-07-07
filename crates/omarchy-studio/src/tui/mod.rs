@@ -21,6 +21,7 @@ mod screens {
     pub mod notifications;
     pub mod palette_editor;
     pub mod themes;
+    pub mod wallhaven;
     pub mod wallpapers;
     pub mod waybar;
     pub mod wizard;
@@ -51,6 +52,7 @@ use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
+use screens::wallhaven::{BrowserAction, Then, WallhavenBrowser};
 use screens::wallpapers::{WallpaperAction, WallpapersScreen};
 use screens::waybar::{WaybarAction, WaybarScreen};
 use screens::wizard::{WizardAction, WizardScreen};
@@ -160,6 +162,8 @@ struct App {
     images: imagecell::ImageCell,
     /// Theme-from-wallpaper wizard, when open (modal over everything).
     wizard: Option<WizardScreen>,
+    /// wallhaven browser, when open (modal; wizard can stack on top via `t`).
+    wallhaven: Option<WallhavenBrowser>,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -251,6 +255,7 @@ impl App {
             wallpapers,
             images,
             wizard: None,
+            wallhaven: None,
             editor: None,
             palette: None,
             help: false,
@@ -357,6 +362,14 @@ impl App {
                 WizardAction::None => {}
                 WizardAction::Cancel => self.wizard = None,
                 WizardAction::Create => self.wizard_create(),
+            }
+            return;
+        }
+        // And the wallhaven browser (search field + its own chord set).
+        if let Some(b) = self.wallhaven.as_mut() {
+            match b.handle(key) {
+                BrowserAction::None => {}
+                BrowserAction::Close => self.wallhaven = None,
             }
             return;
         }
@@ -527,6 +540,7 @@ impl App {
                 WallpaperAction::Add(path) => self.wp_add(&path),
                 WallpaperAction::Remove(entry) => self.wp_remove(&entry),
                 WallpaperAction::Open(entry) => self.wp_open(&entry),
+                WallpaperAction::Wallhaven => self.open_wallhaven(),
                 WallpaperAction::Craft(entry) => self.open_wizard(&entry),
                 WallpaperAction::Tool {
                     exec,
@@ -927,6 +941,51 @@ impl App {
                     ok: false,
                 });
             }
+        }
+    }
+
+    /// `w` on the Wallpapers screen: open the wallhaven browser, seeded with
+    /// the theme accent (color match) and the monitor's resolution floor.
+    fn open_wallhaven(&mut self) {
+        let accent = match self.skin.accent {
+            ratatui::style::Color::Rgb(r, g, b) => Some(format!("#{r:02x}{g:02x}{b:02x}")),
+            _ => None,
+        };
+        let theme = self.paths.current_theme_name().unwrap_or_default();
+        let dir = self.paths.config.join(format!("backgrounds/{theme}"));
+        self.wallhaven = Some(WallhavenBrowser::open(accent, monitor_atleast(), dir));
+    }
+
+    /// Drain the browser's worker results; a finished download turns into
+    /// the action the user asked for (set / craft / keep).
+    fn wallhaven_poll(&mut self) {
+        let Some(b) = self.wallhaven.as_mut() else {
+            return;
+        };
+        let Some((path, then)) = b.drain() else {
+            return;
+        };
+        self.wallpapers.reload(&self.paths);
+        match then {
+            Then::Keep => {
+                self.toast = Some(Toast {
+                    text: format!("saved → {}", path.display()),
+                    ok: true,
+                });
+            }
+            Then::Set => {
+                self.wallhaven = None;
+                self.wp_set(&path);
+            }
+            Then::Craft => match WizardScreen::open(&path) {
+                Ok(w) => self.wizard = Some(w),
+                Err(e) => {
+                    self.toast = Some(Toast {
+                        text: format!("couldn't read image: {}", brief(e)),
+                        ok: false,
+                    });
+                }
+            },
         }
     }
 
@@ -1448,6 +1507,9 @@ impl App {
         self.draw_panel(f, cols[1]);
         self.draw_keybar(f, rows[1]);
 
+        if let Some(b) = &self.wallhaven {
+            b.render(f, cols[1], &self.skin, &mut self.images);
+        }
         if let Some(w) = &self.wizard {
             w.render(f, cols[1], &self.skin);
         }
@@ -1861,6 +1923,28 @@ fn subsequence(needle: &str, hay: &str) -> bool {
     needle.chars().all(|c| chars.any(|h| h == c))
 }
 
+/// Biggest connected monitor as a wallhaven `atleast` floor (`3840x2160`),
+/// via `hyprctl monitors -j`. `None` outside a Hyprland session.
+fn monitor_atleast() -> Option<String> {
+    let out = RealRunner
+        .run(&studio_core::cmd::Cmd::new("hyprctl").args(["monitors", "-j"]))
+        .ok()?;
+    if !out.ok() {
+        return None;
+    }
+    let monitors: serde_json::Value = serde_json::from_str(&out.stdout).ok()?;
+    monitors
+        .as_array()?
+        .iter()
+        .filter_map(|m| {
+            let w = m.get("width")?.as_u64()?;
+            let h = m.get("height")?.as_u64()?;
+            Some((w * h, format!("{w}x{h}")))
+        })
+        .max_by_key(|(area, _)| *area)
+        .map(|(_, res)| res)
+}
+
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width.saturating_sub(2));
     let h = h.min(area.height.saturating_sub(2));
@@ -1908,10 +1992,12 @@ pub fn run() -> i32 {
         if let Err(e) = terminal.draw(|f| app.draw(f)) {
             break Err(e);
         }
-        // While the launch update-check is in flight, poll so its answer can
-        // surface without a keypress; afterwards this is a blocking read
-        // again (zero idle wakeups).
-        if app.update_rx.is_some() {
+        // While background work is in flight (the launch update-check, or
+        // wallhaven requests), poll so results can surface without a
+        // keypress; otherwise this is a blocking read (zero idle wakeups).
+        let background_busy =
+            app.update_rx.is_some() || app.wallhaven.as_ref().is_some_and(|b| b.busy());
+        if background_busy {
             match event::poll(std::time::Duration::from_millis(250)) {
                 Ok(ready) => {
                     let polled = app.update_rx.as_ref().map(|rx| rx.try_recv());
@@ -1922,6 +2008,7 @@ pub fn run() -> i32 {
                         }
                         _ => {}
                     }
+                    app.wallhaven_poll();
                     if app.quit {
                         break Ok(());
                     }
