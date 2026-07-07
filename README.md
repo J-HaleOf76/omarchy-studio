@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (150 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete. Tested against Omarchy 3.8.
+> **Status: alpha.** The modules below are built, tested (167 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete and v0.7 (community asks) is underway. Tested against Omarchy 3.8.
 
 ## Why
 
@@ -96,6 +96,7 @@ omarchy-studio          # launch the full-screen cockpit
 | `t` | (wallpapers) craft a theme from the selected image |
 | `o` | (wallpapers) open in imv / mpv |
 | `s` | save pending edits (snapshotted first) |
+| `U` | install a waiting update & restart |
 | `/` | search · `?` help · `q` quit |
 
 Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. The one not-yet-built screen (the Snapshots browser) shows an honest "arriving in …" placeholder rather than a broken UI.
