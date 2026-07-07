@@ -13,8 +13,10 @@
 //! | `extraction` | FR1.8 | 04 §4 | v0.6 |
 //! | `wallhaven` | FR2.4 | 04 §6 | v0.6 |
 //! | `wizard` | FR2.5 | 04 §7 | v0.6 |
+//! | `battery` | community ask | — | v0.6 |
 
 pub mod animations;
+pub mod battery;
 pub mod color;
 pub mod dispatchers;
 pub mod extraction;

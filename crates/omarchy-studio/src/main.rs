@@ -39,6 +39,7 @@ fn main() {
         ["idle", rest @ ..] => idle(rest),
         ["lock", rest @ ..] => lock(rest),
         ["wallpaper", rest @ ..] => wallpaper(rest),
+        ["battery", rest @ ..] => battery(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1324,6 +1325,90 @@ fn toggle(args: &[&str]) -> i32 {
 }
 
 // ── wallpapers (spec 04 §5) ─────────────────────────────────────────────────
+
+/// `battery` / `battery limit <start> <end> [--persist]` — ThinkPad-style
+/// charge thresholds straight through sysfs, no TLP. Direct writes need
+/// root; denied writes print the exact sudo command instead of failing
+/// silently. --persist (as root) installs the boot-time systemd oneshot.
+fn battery(args: &[&str]) -> i32 {
+    use studio_core::modules::battery as bat;
+    let bats = bat::detect();
+    if bats.is_empty() {
+        eprintln!("no battery found under {}", bat::SYSFS_ROOT);
+        return 1;
+    }
+    match args {
+        [] | ["status"] => {
+            for b in &bats {
+                let charge = b
+                    .capacity
+                    .map(|c| format!("{c}%"))
+                    .unwrap_or_else(|| "?".into());
+                println!("{}  {charge}  {}", b.name, b.status);
+                match (b.start, b.end) {
+                    (Some(s), Some(e)) => {
+                        println!("    charges from {s}% up to {e}%  (battery limit <start> <end>)")
+                    }
+                    (None, Some(e)) => println!("    charging stops at {e}%"),
+                    _ => println!(
+                        "    no charge-threshold interface — needs a driver that exposes \
+                         charge_control_*_threshold (ThinkPads, some ASUS/LG/Huawei)"
+                    ),
+                }
+            }
+            0
+        }
+        ["limit", start, end, rest @ ..] => {
+            let (Ok(start), Ok(end)) = (start.parse::<u8>(), end.parse::<u8>()) else {
+                eprintln!("thresholds are percentages, e.g. `battery limit 75 80`");
+                return 2;
+            };
+            let persist = rest.contains(&"--persist");
+            for b in &bats {
+                if let Err(e) = bat::set_thresholds(b, start, end) {
+                    let msg = match e {
+                        studio_core::StudioError::External { detail, .. } => detail,
+                        other => format!("{other:?}"),
+                    };
+                    eprintln!("{}: {msg}", b.name);
+                    return 1;
+                }
+                println!("{}: charges from {start}% up to {end}%", b.name);
+                if persist {
+                    let unit = bat::persist_unit(b, start, end);
+                    match std::fs::write(bat::PERSIST_UNIT_PATH, unit) {
+                        Ok(()) => {
+                            let _ = std::process::Command::new("systemctl")
+                                .args(["daemon-reload"])
+                                .status();
+                            let _ = std::process::Command::new("systemctl")
+                                .args(["enable", "battery-charge-threshold.service"])
+                                .status();
+                            println!(
+                                "persisted: {} (re-applied at every boot)",
+                                bat::PERSIST_UNIT_PATH
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "couldn't write {}: {e} — run the whole command with sudo",
+                                bat::PERSIST_UNIT_PATH
+                            );
+                            return 1;
+                        }
+                    }
+                } else {
+                    println!("    (resets on reboot — add --persist under sudo to keep it)");
+                }
+            }
+            0
+        }
+        _ => {
+            eprintln!("usage: omarchy-studio battery [status] | limit <start> <end> [--persist]");
+            2
+        }
+    }
+}
 
 fn wallpaper(args: &[&str]) -> i32 {
     use studio_core::modules::wallpapers::Wallpapers;

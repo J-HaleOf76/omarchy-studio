@@ -12,6 +12,7 @@ mod logo;
 mod theme;
 mod screens {
     pub mod animations;
+    pub mod battery;
     pub mod doctor;
     pub mod integrations;
     pub mod keybinds;
@@ -40,6 +41,7 @@ use studio_core::omarchy::{cmds, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 use screens::animations::{AnimAction, AnimationsScreen};
+use screens::battery::{BatteryAction, BatteryScreen};
 use screens::doctor::{DoctorAction, DoctorScreen};
 use screens::integrations::{IntegrationsAction, IntegrationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
@@ -65,11 +67,12 @@ enum Screen {
     LockIdle,
     Snapshots,
     Integrations,
+    Battery,
     Doctor,
 }
 
 impl Screen {
-    const ALL: [Screen; 11] = [
+    const ALL: [Screen; 12] = [
         Screen::Themes,
         Screen::Wallpapers,
         Screen::Keybinds,
@@ -80,6 +83,7 @@ impl Screen {
         Screen::LockIdle,
         Screen::Snapshots,
         Screen::Integrations,
+        Screen::Battery,
         Screen::Doctor,
     ];
 
@@ -95,6 +99,7 @@ impl Screen {
             Screen::LockIdle => "Lock & Idle",
             Screen::Snapshots => "Snapshots",
             Screen::Integrations => "Integrations",
+            Screen::Battery => "Power",
             Screen::Doctor => "Doctor",
         }
     }
@@ -112,6 +117,7 @@ impl Screen {
                 | Screen::Notifications
                 | Screen::LockIdle
                 | Screen::Integrations
+                | Screen::Battery
                 | Screen::Doctor
         )
     }
@@ -145,6 +151,7 @@ struct App {
     waybar: WaybarScreen,
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
+    battery: BatteryScreen,
     doctor: DoctorScreen,
     integrations: IntegrationsScreen,
     wallpapers: WallpapersScreen,
@@ -183,6 +190,7 @@ impl App {
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
+        let battery = BatteryScreen::load();
         let integrations = IntegrationsScreen::load(&RealRunner);
         let mut doctor = DoctorScreen::load(&paths, &RealRunner);
         doctor.set_graphics(images.protocol_label());
@@ -202,6 +210,7 @@ impl App {
             waybar,
             notifications,
             lockidle,
+            battery,
             doctor,
             integrations,
             wallpapers,
@@ -410,6 +419,17 @@ impl App {
                     label,
                     terminal,
                 } => self.launch_tool(&exec, &label, terminal),
+            },
+            Screen::Battery => match self.battery.handle(key) {
+                BatteryAction::None => {}
+                BatteryAction::Apply { start, end } => self.battery_apply(start, end),
+                BatteryAction::Refresh => {
+                    self.battery.reload();
+                    self.toast = Some(Toast {
+                        text: "Re-read battery state".into(),
+                        ok: true,
+                    });
+                }
             },
             Screen::Integrations => match self.integrations.handle(key) {
                 IntegrationsAction::None => {}
@@ -663,6 +683,43 @@ impl App {
                 });
             }
         }
+    }
+
+    /// Write the charge window to every threshold-capable battery. Root is
+    /// usually required — the error detail already carries the sudo command.
+    fn battery_apply(&mut self, start: u8, end: u8) {
+        use studio_core::modules::battery as bat;
+        let capable: Vec<_> = bat::detect()
+            .into_iter()
+            .filter(|b| b.supports_thresholds())
+            .collect();
+        if capable.is_empty() {
+            self.toast = Some(Toast {
+                text: "no charge-threshold interface on this laptop".into(),
+                ok: false,
+            });
+            return;
+        }
+        for b in &capable {
+            if let Err(e) = bat::set_thresholds(b, start, end) {
+                let msg = match e {
+                    studio_core::StudioError::External { detail, .. } => detail,
+                    other => format!("{other:?}"),
+                };
+                self.toast = Some(Toast {
+                    text: msg,
+                    ok: false,
+                });
+                return;
+            }
+        }
+        self.battery.reload();
+        self.toast = Some(Toast {
+            text: format!(
+                "Charge window {start}–{end}% applied — persists until reboot (see the screen for --persist)"
+            ),
+            ok: true,
+        });
     }
 
     /// Launch a companion tool (Integrations screen / contextual actions),
@@ -1398,6 +1455,7 @@ impl App {
                 .wallpapers
                 .render(f, area, &self.skin, &mut self.images),
             Screen::Integrations => self.integrations.render(f, area, &self.skin),
+            Screen::Battery => self.battery.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
         }
@@ -1449,6 +1507,7 @@ impl App {
             Some((ed, _)) => (ed.hint(), false),
             None => match self.screen {
                 Screen::Themes => (self.themes.hint(), true),
+                Screen::Battery => (self.battery.hint(), true),
                 _ => ("tab/1-0 switch".into(), true),
             },
         };
