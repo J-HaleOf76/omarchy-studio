@@ -1941,7 +1941,7 @@ impl App {
                 Screen::Apps => (self.apps.hint().into(), true),
                 Screen::Monitors => (self.monitors.hint().into(), true),
                 Screen::Tweaks => (self.tweaks.hint().into(), true),
-                _ => ("tab/1-0 switch".into(), true),
+                _ => ("tab/^j/^k switch".into(), true),
             },
         };
         let mut spans: Vec<Span> = vec![Span::raw(" ")];
