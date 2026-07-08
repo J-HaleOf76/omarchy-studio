@@ -51,8 +51,10 @@ struct ToggleOverlay {
 
 pub struct LookFeelScreen {
     model: LookFeel,
-    /// Index into `SETTINGS`.
+    /// Absolute index into `SETTINGS` (always within the active group).
     selected: usize,
+    /// Index into `groups()` — the active category tab.
+    active_group: usize,
     scroll: usize,
     /// True once anything has been previewed but not yet saved.
     pub dirty: bool,
@@ -67,6 +69,7 @@ impl LookFeelScreen {
         Self {
             model: LookFeel::load(paths),
             selected: 0,
+            active_group: 0,
             scroll: 0,
             dirty: false,
             picker: None,
@@ -78,9 +81,32 @@ impl LookFeelScreen {
         let keep = self.selected;
         self.model = LookFeel::load(paths);
         self.selected = keep.min(SETTINGS.len().saturating_sub(1));
+        self.active_group = groups()
+            .iter()
+            .position(|g| *g == SETTINGS[self.selected].group)
+            .unwrap_or(0);
         self.dirty = false;
         self.picker = None;
         self.toggles = None;
+    }
+
+    /// Absolute `SETTINGS` indices in the active group, in schema order.
+    fn group_indices(&self) -> Vec<usize> {
+        let group = groups()[self.active_group];
+        SETTINGS
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.group == group)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Switch to another category tab, landing on its first setting.
+    fn switch_group(&mut self, dir: i64) {
+        let n = groups().len() as i64;
+        self.active_group = ((self.active_group as i64 + dir).rem_euclid(n)) as usize;
+        self.selected = self.group_indices()[0];
+        self.scroll = 0;
     }
 
     /// Populate + open the toggles overlay with freshly-read states.
@@ -114,19 +140,25 @@ impl LookFeelScreen {
         if self.toggles.is_some() {
             return self.handle_toggles(key);
         }
-        let n = SETTINGS.len();
+        let idx = self.group_indices();
+        let pos = idx.iter().position(|&i| i == self.selected).unwrap_or(0);
         match key.code {
             KeyCode::Char('p') => {
                 self.picker = Some(0);
                 return LookFeelAction::None;
             }
             KeyCode::Char('t') => return LookFeelAction::OpenToggles,
+            // Tab is a global module-cycle chord; categories use [ and ].
+            KeyCode::Char(']') => self.switch_group(1),
+            KeyCode::Char('[') => self.switch_group(-1),
             KeyCode::Char('j') | KeyCode::Down => {
-                self.selected = (self.selected + 1).min(n - 1);
+                self.selected = idx[(pos + 1).min(idx.len() - 1)];
             }
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = n - 1,
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.selected = idx[pos.saturating_sub(1)];
+            }
+            KeyCode::Char('g') => self.selected = idx[0],
+            KeyCode::Char('G') => self.selected = idx[idx.len() - 1],
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 return self.nudge(1)
             }
@@ -256,42 +288,33 @@ impl LookFeelScreen {
     pub fn render(&mut self, f: &mut Frame, area: Rect, skin: &Skin) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
             .split(area);
 
-        // Build display rows: a header per group, then its settings.
-        let mut items: Vec<ListItem> = Vec::new();
-        // index map: display-row -> Option<setting index>, to place the cursor
-        let mut sel_row = 0usize;
-        let mut row = 0usize;
-        for group in groups() {
-            items.push(ListItem::new(Line::from(Span::styled(
-                format!("  {group}"),
-                skin.dim(),
-            ))));
-            row += 1;
-            for (i, s) in SETTINGS.iter().enumerate() {
-                if s.group != group {
-                    continue;
-                }
-                if i == self.selected {
-                    sel_row = row;
-                }
-                items.push(self.setting_row(i, s, skin));
-                row += 1;
-            }
-        }
+        self.render_tabs(f, rows[0], skin);
 
-        let height = rows[0].height as usize;
+        // Only the active group's settings; selection scrolls within it.
+        let idx = self.group_indices();
+        let sel_row = idx.iter().position(|&i| i == self.selected).unwrap_or(0);
+        let height = rows[1].height as usize;
         if sel_row < self.scroll {
             self.scroll = sel_row;
         } else if sel_row >= self.scroll + height {
             self.scroll = sel_row + 1 - height;
         }
-        let visible: Vec<ListItem> = items.into_iter().skip(self.scroll).take(height).collect();
-        f.render_widget(List::new(visible), rows[0]);
+        let items: Vec<ListItem> = idx
+            .iter()
+            .skip(self.scroll)
+            .take(height)
+            .map(|&i| self.setting_row(i, &SETTINGS[i], skin))
+            .collect();
+        f.render_widget(List::new(items), rows[1]);
 
-        self.render_footer(f, rows[1], skin);
+        self.render_footer(f, rows[2], skin);
 
         if let Some(sel) = self.picker {
             self.render_picker(f, area, skin, sel);
@@ -299,6 +322,22 @@ impl LookFeelScreen {
         if let Some(ov) = &self.toggles {
             self.render_toggles(f, area, skin, ov);
         }
+    }
+
+    /// The category tab strip. The active group is highlighted; an overridden
+    /// count hint could go here later.
+    fn render_tabs(&self, f: &mut Frame, area: Rect, skin: &Skin) {
+        let mut spans = Vec::new();
+        for (i, g) in groups().iter().enumerate() {
+            if i == self.active_group {
+                spans.push(Span::styled(format!(" {g} "), skin.selection()));
+            } else {
+                spans.push(Span::styled(format!(" {g} "), skin.dim()));
+            }
+            spans.push(Span::styled("·", skin.dim()));
+        }
+        spans.pop(); // trailing separator
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn render_toggles(&self, f: &mut Frame, area: Rect, skin: &Skin, ov: &ToggleOverlay) {
@@ -407,7 +446,7 @@ impl LookFeelScreen {
                 save,
             ]),
             Line::from(Span::styled(
-                "h/l adjust   p presets   t toggles   r reset   R reset all   s save",
+                "h/l adjust   [ ] category   p presets   t toggles   r reset   R reset all   s save",
                 skin.dim(),
             )),
         ])

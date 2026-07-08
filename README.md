@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (174 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete and v0.7 (community asks) is underway. Tested against Omarchy 3.8.
+> **Status: alpha.** The modules below are built, tested (176 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Why
 
@@ -16,7 +16,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 |---|---|---|
 | **Themes** | List, show current, apply, fork — with a live preview pane: the theme's wallpaper + a mock terminal drawn in its palette | v0.1 |
 | **Keybinds** | Browse and rebind Hyprland keybindings, live capture | v0.2 |
-| **Look & Feel** | Gaps, borders, rounding, opacity and other Hyprland variables | v0.3 |
+| **Look & Feel** | 56 Hyprland settings across Windows / Layout / Behavior / Decoration / Blur / Shadow / Input / Touchpad — live preview on every adjust, six presets, snapshot undo; input settings land in `input.conf`, the rest in `looknfeel.conf` | v0.3 · v0.8 |
 | **Animations** | Apply curated animation presets | v0.3 |
 | **Waybar** | Reorder/add/remove modules across lanes, tweak settings, font-size & radius, build custom modules — with a crash-watchdog that auto-reverts a config that kills the bar | v0.4 |
 | **Notifications (mako)** | Behavior schema (timeouts, layout, urgency rules), do-not-disturb, live sample notifications | v0.5 |

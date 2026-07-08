@@ -521,13 +521,15 @@ fn apply_looknfeel(
     lf: &studio_core::modules::looknfeel::LookFeel,
     summary: &str,
 ) -> i32 {
-    let file = paths.hypr_config().join("looknfeel.conf");
+    // Snapshot every file Studio may touch (looknfeel.conf + input.conf) so
+    // undo restores all of them.
+    let files = studio_core::modules::looknfeel::LookFeel::managed_paths(paths);
     let store = history().ok();
     if let Some(s) = &store {
         let _ = s.record(
             SnapshotKind::Pre,
             &format!("before {summary}"),
-            std::slice::from_ref(&file),
+            &files,
             "looknfeel",
             &[],
         );
@@ -535,13 +537,7 @@ fn apply_looknfeel(
     match lf.apply(paths, &RealRunner) {
         Ok(_) => {
             if let Some(s) = &store {
-                let _ = s.record(
-                    SnapshotKind::Post,
-                    summary,
-                    std::slice::from_ref(&file),
-                    "looknfeel",
-                    &[],
-                );
+                let _ = s.record(SnapshotKind::Post, summary, &files, "looknfeel", &[]);
             }
             println!("{summary} · undo with `omarchy-studio snapshot undo`");
             0

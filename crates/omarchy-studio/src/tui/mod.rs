@@ -1192,7 +1192,7 @@ impl App {
             });
             return;
         }
-        let file = self.paths.hypr_config().join("looknfeel.conf");
+        let files = studio_core::modules::looknfeel::LookFeel::managed_paths(&self.paths);
         let store = SnapshotStore::open_or_init(
             studio_core::studio_state_dir().join("history"),
             Box::new(RealRunner),
@@ -1201,7 +1201,7 @@ impl App {
             let _ = s.record(
                 SnapshotKind::Pre,
                 "before: look & feel change",
-                std::slice::from_ref(&file),
+                &files,
                 "looknfeel",
                 &[],
             );
@@ -1212,7 +1212,7 @@ impl App {
                     let _ = s.record(
                         SnapshotKind::Post,
                         "look & feel change",
-                        std::slice::from_ref(&file),
+                        &files,
                         "looknfeel",
                         &[],
                     );

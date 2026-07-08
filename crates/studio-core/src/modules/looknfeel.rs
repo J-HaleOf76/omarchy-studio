@@ -25,29 +25,72 @@ pub enum Kind {
     Enum(&'static [&'static str]),
 }
 
+/// Which user config file a setting's managed block lives in. Hyprland merges
+/// all sourced files, so this is purely organizational — but input settings
+/// belong in `input.conf` (which Omarchy sources) rather than `looknfeel.conf`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Looknfeel,
+    Input,
+}
+
+impl Target {
+    /// The user file this target writes to.
+    fn user_file(&self) -> &'static str {
+        match self {
+            Target::Looknfeel => "looknfeel.conf",
+            Target::Input => "input.conf",
+        }
+    }
+    /// The Omarchy default file to read base values from.
+    fn default_file(&self) -> &'static str {
+        match self {
+            Target::Looknfeel => "default/hypr/looknfeel.conf",
+            Target::Input => "default/hypr/input.conf",
+        }
+    }
+    /// The managed-block marker name in that file.
+    fn block_name(&self) -> &'static str {
+        match self {
+            Target::Looknfeel => "looknfeel",
+            Target::Input => "input",
+        }
+    }
+}
+
+/// Every target, for iterating files on load/save.
+pub const TARGETS: &[Target] = &[Target::Looknfeel, Target::Input];
+
 /// One editable look & feel setting.
 #[derive(Debug, Clone, Copy)]
 pub struct Setting {
-    /// Dotted key in looknfeel.conf, e.g. `decoration.blur.size`.
+    /// Dotted key, e.g. `decoration.blur.size` (colon form for `hyprctl`).
     pub key: &'static str,
     pub label: &'static str,
-    /// UI grouping header.
+    /// UI grouping header / tab.
     pub group: &'static str,
+    /// Which config file this setting's override is written to.
+    pub target: Target,
     pub kind: Kind,
-    /// The Omarchy default, shown when the user hasn't overridden it.
+    /// Hyprland's default, shown when the setting isn't set anywhere.
     pub default: &'static str,
     pub help: &'static str,
 }
 
 use Kind::*;
+use Target::{Input as In, Looknfeel as Lf};
 
-/// The curated schema. Order is display order within each group.
+/// The curated schema. Order is display order within each group; groups appear
+/// as tabs in the order first seen here. Every key is verified to exist on the
+/// shipped Hyprland (`hyprctl getoption`) — dead keywords are omitted, not
+/// written as inert config.
 pub const SETTINGS: &[Setting] = &[
-    // Windows
+    // ── Windows ──
     s(
         "general.gaps_in",
         "Inner gaps",
         "Windows",
+        Lf,
         Int { min: 0, max: 60 },
         "5",
         "Space between tiled windows",
@@ -56,6 +99,7 @@ pub const SETTINGS: &[Setting] = &[
         "general.gaps_out",
         "Outer gaps",
         "Windows",
+        Lf,
         Int { min: 0, max: 100 },
         "10",
         "Space between windows and the screen edge",
@@ -64,14 +108,25 @@ pub const SETTINGS: &[Setting] = &[
         "general.border_size",
         "Border width",
         "Windows",
+        Lf,
         Int { min: 0, max: 12 },
         "2",
         "Thickness of the window border",
     ),
     s(
+        "general.extend_border_grab_area",
+        "Border grab area",
+        "Windows",
+        Lf,
+        Int { min: 0, max: 40 },
+        "15",
+        "Pixels around the border that still grab for resizing",
+    ),
+    s(
         "general.resize_on_border",
         "Resize on border",
         "Windows",
+        Lf,
         Bool,
         "false",
         "Drag a window's border or gap to resize it",
@@ -80,15 +135,163 @@ pub const SETTINGS: &[Setting] = &[
         "general.layout",
         "Tiling layout",
         "Windows",
+        Lf,
         Enum(&["dwindle", "master"]),
         "dwindle",
         "How new windows are arranged",
     ),
-    // Corners & opacity
+    // ── Layout ──
+    s(
+        "dwindle.force_split",
+        "Split direction",
+        "Layout",
+        Lf,
+        Int { min: 0, max: 2 },
+        "0",
+        "0 follows the cursor, 1 always left/top, 2 always right/bottom",
+    ),
+    s(
+        "dwindle.preserve_split",
+        "Preserve split",
+        "Layout",
+        Lf,
+        Bool,
+        "false",
+        "Keep the split direction when windows close",
+    ),
+    s(
+        "dwindle.smart_split",
+        "Smart split",
+        "Layout",
+        Lf,
+        Bool,
+        "false",
+        "Choose the split by where you click in the window",
+    ),
+    s(
+        "master.new_status",
+        "Master new window",
+        "Layout",
+        Lf,
+        Enum(&["master", "slave", "inherit"]),
+        "slave",
+        "Where a new window lands in the master layout",
+    ),
+    // ── Behavior ──
+    s(
+        "general.allow_tearing",
+        "Allow tearing",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Permit screen tearing for lower-latency games (per-window)",
+    ),
+    s(
+        "misc.focus_on_activate",
+        "Focus on activate",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Let apps steal focus when they request activation",
+    ),
+    s(
+        "misc.disable_hyprland_logo",
+        "Hide Hyprland logo",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Remove the default background logo on an empty workspace",
+    ),
+    s(
+        "misc.vrr",
+        "Variable refresh",
+        "Behavior",
+        Lf,
+        Int { min: 0, max: 2 },
+        "0",
+        "0 off, 1 on, 2 only for fullscreen",
+    ),
+    s(
+        "misc.middle_click_paste",
+        "Middle-click paste",
+        "Behavior",
+        Lf,
+        Bool,
+        "true",
+        "Paste the primary selection on a middle click",
+    ),
+    s(
+        "misc.enable_swallow",
+        "Window swallowing",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Hide a terminal while the GUI app it launched is open",
+    ),
+    s(
+        "misc.key_press_enables_dpms",
+        "Wake on key",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "A key press wakes the displays from DPMS sleep",
+    ),
+    s(
+        "misc.mouse_move_enables_dpms",
+        "Wake on mouse",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Mouse movement wakes the displays from DPMS sleep",
+    ),
+    s(
+        "binds.workspace_back_and_forth",
+        "Workspace back-and-forth",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Switching to the current workspace returns to the previous one",
+    ),
+    s(
+        "binds.allow_workspace_cycles",
+        "Workspace cycles",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Let previous-workspace cycle through history",
+    ),
+    s(
+        "xwayland.force_zero_scaling",
+        "XWayland crisp scaling",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Force scale 1 for XWayland apps to avoid blur (they self-scale)",
+    ),
+    s(
+        "cursor.hide_on_key_press",
+        "Hide cursor on type",
+        "Behavior",
+        Lf,
+        Bool,
+        "false",
+        "Hide the cursor while you're typing",
+    ),
+    // ── Corners & opacity ──
     s(
         "decoration.rounding",
         "Corner rounding",
         "Corners & opacity",
+        Lf,
         Int { min: 0, max: 30 },
         "0",
         "Radius of rounded window corners",
@@ -97,6 +300,7 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.active_opacity",
         "Active opacity",
         "Corners & opacity",
+        Lf,
         Float { min: 0.0, max: 1.0 },
         "1.0",
         "Opacity of the focused window",
@@ -105,14 +309,25 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.inactive_opacity",
         "Inactive opacity",
         "Corners & opacity",
+        Lf,
         Float { min: 0.0, max: 1.0 },
         "1.0",
         "Opacity of unfocused windows",
     ),
     s(
+        "decoration.fullscreen_opacity",
+        "Fullscreen opacity",
+        "Corners & opacity",
+        Lf,
+        Float { min: 0.0, max: 1.0 },
+        "1.0",
+        "Opacity of a fullscreen window",
+    ),
+    s(
         "decoration.dim_inactive",
         "Dim inactive",
         "Corners & opacity",
+        Lf,
         Bool,
         "false",
         "Darken windows that aren't focused",
@@ -121,15 +336,26 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.dim_strength",
         "Dim strength",
         "Corners & opacity",
+        Lf,
         Float { min: 0.0, max: 1.0 },
         "0.5",
         "How strongly inactive windows are dimmed",
     ),
-    // Blur
+    s(
+        "decoration.dim_special",
+        "Dim special",
+        "Corners & opacity",
+        Lf,
+        Float { min: 0.0, max: 1.0 },
+        "0.2",
+        "How strongly the special workspace dims what's behind it",
+    ),
+    // ── Blur ──
     s(
         "decoration.blur.enabled",
         "Blur",
         "Blur",
+        Lf,
         Bool,
         "true",
         "Blur behind translucent windows",
@@ -138,6 +364,7 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.blur.size",
         "Blur size",
         "Blur",
+        Lf,
         Int { min: 1, max: 20 },
         "2",
         "Radius of the background blur",
@@ -146,15 +373,62 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.blur.passes",
         "Blur passes",
         "Blur",
+        Lf,
         Int { min: 1, max: 6 },
         "2",
         "More passes = smoother, heavier blur",
     ),
-    // Shadow
+    s(
+        "decoration.blur.special",
+        "Blur special",
+        "Blur",
+        Lf,
+        Bool,
+        "false",
+        "Also blur behind the special workspace",
+    ),
+    s(
+        "decoration.blur.brightness",
+        "Blur brightness",
+        "Blur",
+        Lf,
+        Float { min: 0.0, max: 2.0 },
+        "0.8",
+        "Brightness of the blurred background",
+    ),
+    s(
+        "decoration.blur.contrast",
+        "Blur contrast",
+        "Blur",
+        Lf,
+        Float { min: 0.0, max: 2.0 },
+        "0.9",
+        "Contrast of the blurred background",
+    ),
+    s(
+        "decoration.blur.noise",
+        "Blur noise",
+        "Blur",
+        Lf,
+        Float { min: 0.0, max: 1.0 },
+        "0.02",
+        "Film-grain noise added over the blur",
+    ),
+    s(
+        "decoration.blur.popups",
+        "Blur popups",
+        "Blur",
+        Lf,
+        Bool,
+        "false",
+        "Blur behind menus and popups too",
+    ),
+    // ── Shadow ──
     s(
         "decoration.shadow.enabled",
         "Shadow",
         "Shadow",
+        Lf,
         Bool,
         "true",
         "Drop shadow under windows",
@@ -163,6 +437,7 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.shadow.range",
         "Shadow size",
         "Shadow",
+        Lf,
         Int { min: 0, max: 60 },
         "2",
         "How far the shadow spreads",
@@ -171,16 +446,174 @@ pub const SETTINGS: &[Setting] = &[
         "decoration.shadow.render_power",
         "Shadow softness",
         "Shadow",
+        Lf,
         Int { min: 1, max: 4 },
         "3",
         "Falloff curve of the shadow",
     ),
+    // ── Input ──
+    s(
+        "input.sensitivity",
+        "Mouse sensitivity",
+        "Input",
+        In,
+        Float {
+            min: -1.0,
+            max: 1.0,
+        },
+        "0",
+        "Pointer speed, -1 slowest to 1 fastest (0 = unchanged)",
+    ),
+    s(
+        "input.follow_mouse",
+        "Focus follows mouse",
+        "Input",
+        In,
+        Int { min: 0, max: 3 },
+        "1",
+        "0 off, 1 on, 2 loose, 3 full — how focus tracks the pointer",
+    ),
+    s(
+        "input.accel_profile",
+        "Accel profile",
+        "Input",
+        In,
+        Enum(&["adaptive", "flat"]),
+        "adaptive",
+        "Pointer acceleration curve (flat = 1:1)",
+    ),
+    s(
+        "input.force_no_accel",
+        "Disable acceleration",
+        "Input",
+        In,
+        Bool,
+        "false",
+        "Bypass all pointer acceleration (raw input)",
+    ),
+    s(
+        "input.left_handed",
+        "Left-handed",
+        "Input",
+        In,
+        Bool,
+        "false",
+        "Swap left and right mouse buttons",
+    ),
+    s(
+        "input.repeat_rate",
+        "Key repeat rate",
+        "Input",
+        In,
+        Int { min: 1, max: 100 },
+        "25",
+        "Repeats per second while a key is held",
+    ),
+    s(
+        "input.repeat_delay",
+        "Key repeat delay",
+        "Input",
+        In,
+        Int {
+            min: 100,
+            max: 2000,
+        },
+        "600",
+        "Milliseconds before a held key starts repeating",
+    ),
+    s(
+        "input.numlock_by_default",
+        "Numlock on start",
+        "Input",
+        In,
+        Bool,
+        "false",
+        "Enable Num Lock when Hyprland starts",
+    ),
+    s(
+        "input.natural_scroll",
+        "Natural scroll (mouse)",
+        "Input",
+        In,
+        Bool,
+        "false",
+        "Reverse the mouse scroll direction",
+    ),
+    s(
+        "input.scroll_factor",
+        "Scroll speed",
+        "Input",
+        In,
+        Float {
+            min: 0.1,
+            max: 10.0,
+        },
+        "1.0",
+        "Multiplier for scroll distance",
+    ),
+    s(
+        "input.scroll_method",
+        "Scroll method",
+        "Input",
+        In,
+        Enum(&["2fg", "edge", "on_button_down", "no_scroll"]),
+        "2fg",
+        "How scrolling is detected on the touchpad",
+    ),
+    // ── Touchpad ──
+    s(
+        "input.touchpad.natural_scroll",
+        "Natural scroll",
+        "Touchpad",
+        In,
+        Bool,
+        "false",
+        "Reverse the touchpad scroll direction",
+    ),
+    s(
+        "input.touchpad.disable_while_typing",
+        "Disable while typing",
+        "Touchpad",
+        In,
+        Bool,
+        "true",
+        "Ignore the touchpad while the keyboard is active",
+    ),
+    s(
+        "input.touchpad.tap-to-click",
+        "Tap to click",
+        "Touchpad",
+        In,
+        Bool,
+        "true",
+        "A tap on the touchpad registers as a click",
+    ),
+    s(
+        "input.touchpad.drag_lock",
+        "Drag lock",
+        "Touchpad",
+        In,
+        Bool,
+        "false",
+        "Keep dragging after briefly lifting your finger",
+    ),
+    s(
+        "input.touchpad.middle_button_emulation",
+        "Middle-button emulation",
+        "Touchpad",
+        In,
+        Bool,
+        "false",
+        "Press left and right together for a middle click",
+    ),
 ];
 
+#[allow(clippy::too_many_arguments)]
 const fn s(
     key: &'static str,
     label: &'static str,
     group: &'static str,
+    target: Target,
     kind: Kind,
     default: &'static str,
     help: &'static str,
@@ -189,6 +622,7 @@ const fn s(
         key,
         label,
         group,
+        target,
         kind,
         default,
         help,
@@ -367,39 +801,45 @@ pub struct LookFeel {
     overrides: BTreeMap<String, String>,
 }
 
-fn block() -> ManagedBlock {
-    ManagedBlock::new("looknfeel", CommentStyle::Hash)
+fn block(target: Target) -> ManagedBlock {
+    ManagedBlock::new(target.block_name(), CommentStyle::Hash)
 }
 
-fn user_path(paths: &OmarchyPaths) -> PathBuf {
-    paths.hypr_config().join("looknfeel.conf")
+fn user_path(paths: &OmarchyPaths, target: Target) -> PathBuf {
+    paths.hypr_config().join(target.user_file())
+}
+
+fn default_path(paths: &OmarchyPaths, target: Target) -> PathBuf {
+    paths.system.join(target.default_file())
 }
 
 impl LookFeel {
     pub fn load(paths: &OmarchyPaths) -> Self {
-        // Base: default looknfeel overlaid by the user's file with our managed
-        // block stripped out (so we read the user's own values, not ours).
         let mut base = BTreeMap::new();
-        let default = paths.system.join("default/hypr/looknfeel.conf");
-        for path in [default, user_path(paths)] {
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                let cleaned = block().remove(&text);
-                let doc = HyprDoc::parse(&cleaned);
-                for setting in SETTINGS {
-                    if let Some(v) = doc.get(setting.key) {
-                        base.insert(setting.key.to_string(), v);
+        let mut overrides = BTreeMap::new();
+
+        for &target in TARGETS {
+            // Base: the Omarchy default file overlaid by the user's own file,
+            // with our managed block stripped so we read the user's values not
+            // ours. A key can appear in either file (e.g. `misc` lives in both).
+            for path in [default_path(paths, target), user_path(paths, target)] {
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    let cleaned = block(target).remove(&text);
+                    let doc = HyprDoc::parse(&cleaned);
+                    for setting in SETTINGS {
+                        if let Some(v) = doc.get(setting.key) {
+                            base.insert(setting.key.to_string(), strip_inline_comment(&v));
+                        }
                     }
                 }
             }
-        }
-
-        // Overrides: whatever is in our managed block already.
-        let mut overrides = BTreeMap::new();
-        if let Ok(text) = std::fs::read_to_string(user_path(paths)) {
-            if let Some(body) = block().extract(&text) {
-                let doc = HyprDoc::parse(body);
-                for e in doc.entries() {
-                    overrides.insert(e.dotted(), e.value);
+            // Overrides: whatever is in this target's managed block already.
+            if let Ok(text) = std::fs::read_to_string(user_path(paths, target)) {
+                if let Some(body) = block(target).extract(&text) {
+                    let doc = HyprDoc::parse(body);
+                    for e in doc.entries() {
+                        overrides.insert(e.dotted(), e.value);
+                    }
                 }
             }
         }
@@ -485,29 +925,47 @@ impl LookFeel {
         }
     }
 
-    /// Render the managed block body as nested category blocks.
-    pub fn render_block_body(&self) -> String {
+    /// Render one target's managed block body as nested category blocks, from
+    /// the overrides whose settings belong to that target. Returns None when
+    /// this target has no overrides (its block should be removed).
+    pub fn render_block_body(&self, target: Target) -> Option<String> {
         let entries: Vec<(Vec<String>, String)> = self
             .overrides
             .iter()
+            .filter(|(k, _)| lookup(k).map(|s| s.target) == Some(target))
             .map(|(k, v)| (k.split('.').map(str::to_string).collect(), v.clone()))
             .collect();
+        if entries.is_empty() {
+            return None;
+        }
         let mut out = String::from("# Managed by Omarchy Studio — your look & feel tweaks.\n");
         render_nested(&entries, 0, &mut out);
-        out.trim_end().to_string()
+        Some(out.trim_end().to_string())
     }
 
-    /// Persist the managed block (empty overrides remove it). Returns the path.
-    pub fn save(&self, paths: &OmarchyPaths) -> Result<PathBuf> {
-        let path = user_path(paths);
-        let existing = std::fs::read_to_string(&path).unwrap_or_default();
-        let updated = if self.overrides.is_empty() {
-            block().remove(&existing)
-        } else {
-            block().upsert(&existing, &self.render_block_body())
-        };
-        atomic_write(&path, &updated)?;
-        Ok(path)
+    /// The user files Studio may write for these settings — snapshot these
+    /// before applying so undo restores every touched file.
+    pub fn managed_paths(paths: &OmarchyPaths) -> Vec<PathBuf> {
+        TARGETS.iter().map(|&t| user_path(paths, t)).collect()
+    }
+
+    /// Persist each target's managed block (a target with no overrides has its
+    /// block removed). Returns the files written.
+    pub fn save(&self, paths: &OmarchyPaths) -> Result<Vec<PathBuf>> {
+        let mut written = Vec::new();
+        for &target in TARGETS {
+            let path = user_path(paths, target);
+            let existing = std::fs::read_to_string(&path).unwrap_or_default();
+            let updated = match self.render_block_body(target) {
+                Some(body) => block(target).upsert(&existing, &body),
+                None => block(target).remove(&existing),
+            };
+            if updated != existing {
+                atomic_write(&path, &updated)?;
+                written.push(path);
+            }
+        }
+        Ok(written)
     }
 
     /// Save and live-reload Hyprland. Caller snapshots first for undo.
@@ -515,8 +973,8 @@ impl LookFeel {
         &self,
         paths: &OmarchyPaths,
         runner: &dyn crate::cmd::CommandRunner,
-    ) -> Result<PathBuf> {
-        let path = self.save(paths)?;
+    ) -> Result<Vec<PathBuf>> {
+        let written = self.save(paths)?;
         let out = runner.run(&crate::omarchy::cmds::hypr_reload())?;
         if !out.ok() {
             return Err(StudioError::External {
@@ -524,8 +982,21 @@ impl LookFeel {
                 detail: out.stderr.trim().to_string(),
             });
         }
-        Ok(path)
+        Ok(written)
     }
+}
+
+/// Strip a hyprlang inline comment from a value read out of a config file:
+/// `0 # -1.0 - 1.0, means no change` → `0`. A `#` only starts a comment when
+/// preceded by whitespace (or at the start), so values are left intact.
+fn strip_inline_comment(v: &str) -> String {
+    let bytes = v.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'#' && (i == 0 || bytes[i - 1].is_ascii_whitespace()) {
+            return v[..i].trim().to_string();
+        }
+    }
+    v.trim().to_string()
 }
 
 /// Hyprland's colon form of a dotted key: `decoration.blur.size` →
@@ -577,9 +1048,23 @@ mod tests {
                 s.key
             );
         }
+        // keys are unique
+        let mut seen = std::collections::HashSet::new();
+        for s in SETTINGS {
+            assert!(seen.insert(s.key), "duplicate key {}", s.key);
+        }
         assert!(lookup("decoration.blur.size").is_some());
         assert!(groups().contains(&"Blur"));
+        assert!(groups().contains(&"Input"));
+        assert!(groups().contains(&"Touchpad"));
         assert_eq!(colon_key("decoration.blur.size"), "decoration:blur:size");
+        // input settings target input.conf; the rest target looknfeel.conf
+        assert_eq!(lookup("input.repeat_rate").unwrap().target, Target::Input);
+        assert_eq!(
+            lookup("input.touchpad.tap-to-click").unwrap().target,
+            Target::Input
+        );
+        assert_eq!(lookup("general.gaps_in").unwrap().target, Target::Looknfeel);
     }
 
     #[test]
@@ -622,7 +1107,11 @@ mod tests {
         )
         .unwrap();
         // user's own file bumps border_size; no Studio block yet
-        std::fs::write(user_path(&paths), "general {\n    border_size = 4\n}\n").unwrap();
+        std::fs::write(
+            user_path(&paths, Target::Looknfeel),
+            "general {\n    border_size = 4\n}\n",
+        )
+        .unwrap();
 
         let mut lf = LookFeel::load(&paths);
         assert_eq!(lf.value("general.gaps_in"), "5"); // from default
@@ -639,7 +1128,7 @@ mod tests {
         assert_eq!(reloaded.value("general.gaps_in"), "12");
         assert!(reloaded.is_overridden("general.gaps_in"));
         assert_eq!(reloaded.value("general.border_size"), "4"); // user's own preserved
-        let on_disk = std::fs::read_to_string(user_path(&paths)).unwrap();
+        let on_disk = std::fs::read_to_string(user_path(&paths, Target::Looknfeel)).unwrap();
         assert!(on_disk.contains("border_size = 4")); // untouched
         assert!(on_disk.contains("omarchy-studio:looknfeel"));
 
@@ -647,9 +1136,68 @@ mod tests {
         let mut r2 = LookFeel::load(&paths);
         r2.clear("general.gaps_in");
         r2.save(&paths).unwrap();
-        let after = std::fs::read_to_string(user_path(&paths)).unwrap();
+        let after = std::fs::read_to_string(user_path(&paths, Target::Looknfeel)).unwrap();
         assert!(!after.contains("omarchy-studio:looknfeel"));
         assert!(after.contains("border_size = 4"));
+    }
+
+    #[test]
+    fn base_value_strips_inline_comment() {
+        assert_eq!(strip_inline_comment("0 # -1.0 - 1.0, no change"), "0");
+        assert_eq!(strip_inline_comment("  5\t# gaps"), "5");
+        assert_eq!(strip_inline_comment("dwindle"), "dwindle");
+        assert_eq!(strip_inline_comment("rgba(11223344)"), "rgba(11223344)");
+
+        // and it flows through base reading: the Omarchy default's commented
+        // sensitivity line resolves to a clean, nudge-able value.
+        let paths = fake_paths("inline");
+        std::fs::write(
+            paths.system.join("default/hypr/input.conf"),
+            "input {\n    sensitivity = 0 # -1.0 - 1.0, 0 means no modification.\n}\n",
+        )
+        .unwrap();
+        let lf = LookFeel::load(&paths);
+        assert_eq!(lf.value("input.sensitivity"), "0");
+    }
+
+    #[test]
+    fn input_settings_write_to_input_conf() {
+        let paths = fake_paths("targets");
+        // an input override and a looknfeel override
+        let mut lf = LookFeel::load(&paths);
+        lf.set("input.repeat_rate", "35").unwrap();
+        lf.set("input.touchpad.tap-to-click", "false").unwrap();
+        lf.set("general.gaps_in", "9").unwrap();
+        let written = lf.save(&paths).unwrap();
+        assert_eq!(written.len(), 2); // both files touched
+
+        let input_conf = std::fs::read_to_string(user_path(&paths, Target::Input)).unwrap();
+        let lnf_conf = std::fs::read_to_string(user_path(&paths, Target::Looknfeel)).unwrap();
+        // input keys land in input.conf, not looknfeel.conf
+        assert!(input_conf.contains("omarchy-studio:input"));
+        assert!(input_conf.contains("repeat_rate = 35"));
+        assert!(input_conf.contains("tap-to-click = false")); // hyphen key survives
+        assert!(!input_conf.contains("gaps_in"));
+        assert!(lnf_conf.contains("omarchy-studio:looknfeel"));
+        assert!(lnf_conf.contains("gaps_in = 9"));
+        assert!(!lnf_conf.contains("repeat_rate"));
+
+        // round-trips back from the split files, including the hyphenated key
+        let reloaded = LookFeel::load(&paths);
+        assert_eq!(reloaded.value("input.repeat_rate"), "35");
+        assert_eq!(reloaded.value("input.touchpad.tap-to-click"), "false");
+        assert_eq!(reloaded.value("general.gaps_in"), "9");
+        assert!(reloaded.is_overridden("input.touchpad.tap-to-click"));
+
+        // clearing only the input overrides removes the input block, keeps lnf
+        let mut r = reloaded;
+        r.clear("input.repeat_rate");
+        r.clear("input.touchpad.tap-to-click");
+        r.save(&paths).unwrap();
+        let input_after = std::fs::read_to_string(user_path(&paths, Target::Input)).unwrap();
+        assert!(!input_after.contains("omarchy-studio:input"));
+        let lnf_after = std::fs::read_to_string(user_path(&paths, Target::Looknfeel)).unwrap();
+        assert!(lnf_after.contains("gaps_in = 9"));
     }
 
     #[test]
@@ -667,7 +1215,7 @@ mod tests {
         }
         // applying replaces overrides wholesale
         let paths = fake_paths("preset");
-        std::fs::write(user_path(&paths), "").unwrap();
+        std::fs::write(user_path(&paths, Target::Looknfeel), "").unwrap();
         let mut lf = LookFeel::load(&paths);
         lf.set("general.gaps_in", "40").unwrap();
         lf.apply_preset(preset("Minimal").unwrap());
