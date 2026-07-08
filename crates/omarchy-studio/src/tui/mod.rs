@@ -439,11 +439,15 @@ impl App {
                     self.cycle(-1);
                     return;
                 }
-                KeyCode::Char('j') | KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('j') | KeyCode::Down
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     self.cycle(1);
                     return;
                 }
-                KeyCode::Char('k') | KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('k') | KeyCode::Up
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     self.cycle(-1);
                     return;
                 }
@@ -1832,7 +1836,7 @@ impl App {
                 ))
                 .right_aligned(),
             );
-            
+
         let mut state = ratatui::widgets::ListState::default();
         let selected_idx = Screen::ALL.iter().position(|s| *s == self.screen).unwrap();
         state.select(Some(selected_idx));
