@@ -1,4 +1,19 @@
-# Omarchy Studio
+```text
+o m a r c h y
+                                       ▄██  ▄█▄           
+ ▄██████▄    ▄██       ▄█   █▄    ▄███▄███        ▄█████▄ 
+███   █▀   ▄▄███▄▄▄   ███   ███  ███   ███  ▄██  ███   ███
+███        ▀▀███▀▀▀   ███   ███  ███   ███  ███  ███   ███
+ ▀██████▄    ███      ███   ███  ███   ███  ███  ███   ███
+      ███    ███      ███   ███  ███   ███  ███  ███   ███
+▄█    ███    ███      ███   ███  ███   ███  ███  ███   ███
+███   ███    ███ ▄█   ███   ███  ███   ███  ███  ███   ███
+ ▀█████▀     ▀████▀    ▀█████▀    ▀█████▀   ▀█▀   ▀█████▀ 
+```
+
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/arino08/omarchy-studio?style=flat-square&color=cba6f7)](https://github.com/arino08/omarchy-studio/releases/latest)
+[![CI status](https://img.shields.io/github/actions/workflow/status/arino08/omarchy-studio/ci.yml?branch=main&style=flat-square&color=a6e3a1)](https://github.com/arino08/omarchy-studio/actions/workflows/ci.yml)
+[![Platform: Linux](https://img.shields.io/badge/platform-linux%20%7C%20wayland-89b4fa?style=flat-square)](https://github.com/arino08/omarchy-studio)
 
 **The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
