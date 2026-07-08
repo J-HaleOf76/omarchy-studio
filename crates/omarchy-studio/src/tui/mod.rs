@@ -608,6 +608,7 @@ impl App {
             Screen::Battery => match self.battery.handle(key) {
                 BatteryAction::None => {}
                 BatteryAction::Apply { start, end } => self.battery_apply(start, end),
+                BatteryAction::SetProfile(name) => self.set_power_profile(name),
                 BatteryAction::Refresh => {
                     self.battery.reload();
                     self.toast = Some(Toast {
@@ -801,6 +802,34 @@ impl App {
             text: "Saved monitor layout · undo from Snapshots".into(),
             ok: true,
         });
+    }
+
+    /// Switch the active power profile and persist it at login (roadmap 0.8.6).
+    fn set_power_profile(&mut self, name: String) {
+        use studio_core::modules::power;
+        let out = RealRunner.run(&power::set_cmd(&name));
+        match out {
+            Ok(o) if o.ok() => {
+                let _ = power::set_persist(&self.paths, Some(&name));
+                self.battery.reload();
+                self.toast = Some(Toast {
+                    text: format!("Power profile → {name}"),
+                    ok: true,
+                });
+            }
+            Ok(o) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't switch profile: {}", o.stderr.trim()),
+                    ok: false,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't switch profile: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
     }
 
     fn apply_waybar(&mut self) {

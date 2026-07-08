@@ -45,6 +45,7 @@ fn main() {
         ["apps", rest @ ..] => apps(rest),
         ["monitor", rest @ ..] => monitor(rest),
         ["tweak", rest @ ..] => tweak(rest),
+        ["power", rest @ ..] => power(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1552,6 +1553,119 @@ fn update(args: &[&str]) -> i32 {
                 1
             }
         },
+    }
+}
+
+// ── power (profiles + AC/battery auto-switch, roadmap 0.8.6) ─────────────────
+
+fn power(args: &[&str]) -> i32 {
+    use studio_core::modules::power as pw;
+
+    if !pw::available() {
+        eprintln!("power-profiles-daemon not found (install power-profiles-daemon).");
+        return 4;
+    }
+    let Some(paths) = omarchy() else { return 4 };
+
+    match args {
+        ["profile", "list"] | ["profile"] => match pw::list(&RealRunner) {
+            Ok(profiles) => {
+                let persisted = pw::persisted(&paths);
+                for p in profiles {
+                    let mark = if p.active { "●" } else { "○" };
+                    let tag = if persisted.as_deref() == Some(&p.name) {
+                        "  (persisted at login)"
+                    } else {
+                        ""
+                    };
+                    println!("  {mark} {}{tag}", p.name);
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("can't list profiles: {}", brief(e));
+                1
+            }
+        },
+        ["profile", "get"] => match pw::active(&RealRunner) {
+            Some(name) => {
+                println!("{name}");
+                0
+            }
+            None => {
+                eprintln!("couldn't read the active profile");
+                1
+            }
+        },
+        ["profile", "set", name, rest @ ..] => {
+            let persist = rest.contains(&"--persist");
+            let out = RealRunner.run(&pw::set_cmd(name));
+            match out {
+                Ok(o) if o.ok() => println!("profile → {name}"),
+                Ok(o) => {
+                    eprintln!("couldn't set profile: {}", o.stderr.trim());
+                    return 1;
+                }
+                Err(e) => {
+                    eprintln!("couldn't set profile: {}", brief(e));
+                    return 1;
+                }
+            }
+            if persist {
+                match pw::set_persist(&paths, Some(name)) {
+                    Ok(_) => println!("persisted at login (autostart.conf)"),
+                    Err(e) => eprintln!("couldn't persist: {}", brief(e)),
+                }
+            }
+            0
+        }
+        ["auto", "off", rest @ ..] => {
+            let yes = rest.contains(&"--yes");
+            println!("would run:  {}", pw::remove_rule_cmd());
+            if yes {
+                run_shell(&pw::remove_rule_cmd())
+            } else {
+                println!("\nre-run with --yes to remove the auto-switch rule.");
+                0
+            }
+        }
+        ["auto", on_ac, on_bat, rest @ ..] => {
+            let yes = rest.contains(&"--yes");
+            let rule = pw::udev_rule(on_ac, on_bat);
+            println!("udev rule ({}):\n", studio_core::modules::power::UDEV_PATH);
+            print!("{rule}");
+            let cmd = pw::install_rule_cmd(&rule);
+            println!("\nwould run:  {cmd}");
+            if yes {
+                run_shell(&cmd)
+            } else {
+                println!("\nthis writes a root-owned file — re-run with --yes to install it.");
+                0
+            }
+        }
+        _ => {
+            eprintln!("usage: power profile list|get|set <name> [--persist] | auto <ac> <bat> [--yes] | auto off [--yes]");
+            2
+        }
+    }
+}
+
+/// Run a shell command line (used for the previewed root writes; invoked only
+/// after an explicit --yes). sudo prompts happen in the user's terminal.
+fn run_shell(cmd: &str) -> i32 {
+    match RealRunner.run(&studio_core::cmd::Cmd::new("sh").args(["-c", cmd])) {
+        Ok(o) if o.ok() => {
+            println!("done.");
+            0
+        }
+        Ok(o) => {
+            eprintln!("failed: {}", o.stderr.trim());
+            1
+        }
+        Err(e) => {
+            eprintln!("failed: {}", brief(e));
+            1
+        }
     }
 }
 

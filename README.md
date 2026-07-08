@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (212 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
+> **Status: alpha.** The modules below are built, tested (218 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Why
 
@@ -29,7 +29,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Theme wizard** | `t` on any wallpaper (or `theme new --from-image`): live extraction → named, 100 % standard theme dir with preview.png | v0.6 |
 | **wallhaven** | Browse wallhaven.cc without leaving the TUI (`w` in Wallpapers): live search, sort/ratio/color-match filters, thumbnail previews, download-and-set or feed straight into the theme wizard — plus the same search on the CLI | v0.6–0.7 |
 | **Integrations** | Dependency health + companion-tool detection (Aether, Omarchist, matugen, hyprmon) with launch actions; "Open in Aether" appears in the wallpaper browser when installed | v0.6 |
-| **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
+| **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots. Plus power profiles (switch & persist at login) and an AC/battery auto-switch udev rule shown for approval before any root write | v0.6 · v0.8 |
 | **Apps & services** | Remove bundled apps and web apps safely: a `pacman -Rs --print` **cascade preview** shows every orphaned dependency, enabled systemd units are disabled first, and pacman's refusal to break a dependency is surfaced as a blocker (never forced). Every removal is logged so `apps restore <id>` can reinstall it. No bulk-confirm bypass | v0.8 |
 | **Monitors** | Detect displays (`hyprctl monitors -j`), identify which panel is which, adjust scale with the effective resolution shown live, disable a display — written to `monitors.conf` as a managed block with a hotplug fallback, snapshot-backed | v0.8 |
 | **Quick tweaks** | One-key reversible toggles (Caps→Escape, inactive-window transparency, screenshot/screencast folders…) — each a self-contained managed block, individually revertible, never touching Omarchy's vendored files | v0.8 |
@@ -163,6 +163,11 @@ omarchy-studio monitor apply [--dry-run]         # persist the current layout
 # Quick tweaks — one-key reversible toggles
 omarchy-studio tweak list                        # catalog with live on/off state
 omarchy-studio tweak <id> on | off               # e.g. caps-escape, inactive-transparency
+
+# Power profiles + AC/battery auto-switch
+omarchy-studio power profile list | get          # profiles, active marker
+omarchy-studio power profile set <name> [--persist]
+omarchy-studio power auto <ac> <bat> [--yes]     # udev rule, previewed before the root write
 
 # Notifications (mako)
 omarchy-studio notif list | get <key> | set <key> <value>

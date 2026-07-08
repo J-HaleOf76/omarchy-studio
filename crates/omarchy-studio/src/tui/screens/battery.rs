@@ -13,7 +13,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use studio_core::cmd::RealRunner;
 use studio_core::modules::battery::{detect, Battery};
+use studio_core::modules::power::{self, Profile};
 
 use crate::tui::theme::Skin;
 
@@ -24,6 +26,8 @@ pub enum BatteryAction {
         start: u8,
         end: u8,
     },
+    /// Switch the active power profile (and persist it at login).
+    SetProfile(String),
     Refresh,
 }
 
@@ -34,6 +38,8 @@ pub struct BatteryScreen {
     end: u8,
     /// 0 = start field, 1 = end field.
     field: usize,
+    /// Available power profiles (empty when power-profiles-daemon is absent).
+    profiles: Vec<Profile>,
 }
 
 impl BatteryScreen {
@@ -43,16 +49,32 @@ impl BatteryScreen {
             .first()
             .map(|b| (b.start.unwrap_or(75), b.end.unwrap_or(80)))
             .unwrap_or((75, 80));
+        let profiles = if power::available() {
+            power::list(&RealRunner).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         Self {
             bats,
             start,
             end,
             field: 0,
+            profiles,
         }
     }
 
     pub fn reload(&mut self) {
         *self = Self::load();
+    }
+
+    /// The profile after the active one (wraps), for the `p` cycle key.
+    fn next_profile(&self) -> Option<String> {
+        if self.profiles.is_empty() {
+            return None;
+        }
+        let cur = self.profiles.iter().position(|p| p.active).unwrap_or(0);
+        let next = (cur + 1) % self.profiles.len();
+        Some(self.profiles[next].name.clone())
     }
 
     fn editable(&self) -> bool {
@@ -62,6 +84,11 @@ impl BatteryScreen {
     pub fn handle(&mut self, key: KeyEvent) -> BatteryAction {
         match key.code {
             KeyCode::Char('r') => return BatteryAction::Refresh,
+            KeyCode::Char('p') => {
+                if let Some(name) = self.next_profile() {
+                    return BatteryAction::SetProfile(name);
+                }
+            }
             _ if !self.editable() => return BatteryAction::None,
             KeyCode::Char('j') | KeyCode::Down => self.field = 1,
             KeyCode::Char('k') | KeyCode::Up => self.field = 0,
@@ -91,10 +118,15 @@ impl BatteryScreen {
     }
 
     pub fn hint(&self) -> String {
-        if self.editable() {
-            "j/k field · h/l adjust · s apply · r re-read".into()
+        let profile = if self.profiles.is_empty() {
+            ""
         } else {
-            "r re-read".into()
+            " · p profile"
+        };
+        if self.editable() {
+            format!("j/k field · h/l adjust · s apply{profile} · r re-read")
+        } else {
+            format!("r re-read{profile}")
         }
     }
 
@@ -129,6 +161,29 @@ impl BatteryScreen {
             }
         }
         lines.push(Line::from(""));
+
+        if !self.profiles.is_empty() {
+            lines.push(Line::from(Span::styled("  Power profile", skin.dim())));
+            let mut spans = vec![Span::raw("    ")];
+            for (i, p) in self.profiles.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("   ", skin.dim()));
+                }
+                let style = if p.active {
+                    skin.accent_bold()
+                } else {
+                    skin.dim()
+                };
+                let dot = if p.active { "● " } else { "○ " };
+                spans.push(Span::styled(format!("{dot}{}", p.name), style));
+            }
+            lines.push(Line::from(spans));
+            lines.push(Line::from(Span::styled(
+                "    p cycles the active profile (persisted at login)",
+                skin.dim(),
+            )));
+            lines.push(Line::from(""));
+        }
 
         if self.editable() {
             lines.push(Line::from(Span::styled("  Charge window", skin.dim())));
