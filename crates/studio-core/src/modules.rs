@@ -17,6 +17,7 @@
 //! | [`update`] | community ask | — | v0.7 |
 
 pub mod animations;
+pub mod apps;
 pub mod battery;
 pub mod color;
 pub mod dispatchers;

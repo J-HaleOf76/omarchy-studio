@@ -42,6 +42,7 @@ fn main() {
         ["battery", rest @ ..] => battery(rest),
         ["update", rest @ ..] => update(rest),
         ["target", rest @ ..] => target(rest),
+        ["apps", rest @ ..] => apps(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1550,6 +1551,215 @@ fn update(args: &[&str]) -> i32 {
             }
         },
     }
+}
+
+// ── apps (apps & services manager, roadmap 0.8.3) ────────────────────────────
+
+fn apps(args: &[&str]) -> i32 {
+    use studio_core::modules::apps::{self, Inventory, Manifest, RemovalPlan};
+    let Some(paths) = omarchy() else { return 4 };
+
+    match args {
+        ["list", rest @ ..] => {
+            let only_installed = rest.contains(&"--installed");
+            let with_all = rest.contains(&"--all");
+            let inv = Inventory::probe(&RealRunner, &paths);
+            println!("apps");
+            for item in apps::CATALOG {
+                let installed = inv.is_installed(item);
+                if only_installed && !installed {
+                    continue;
+                }
+                let mark = if installed { "●" } else { "○" };
+                let svc = if item.services.is_empty() {
+                    String::new()
+                } else {
+                    format!("  [{}]", item.services.join(", "))
+                };
+                println!(
+                    "  {mark} {:<18} {:<9} {}{}",
+                    item.id,
+                    item.kind.label(),
+                    item.desc,
+                    svc
+                );
+            }
+            if with_all {
+                let extras = Inventory::extras(&RealRunner);
+                if !extras.is_empty() {
+                    println!("\nother explicitly-installed packages ({}):", extras.len());
+                    for name in extras {
+                        println!("  ○ {name}");
+                    }
+                }
+            }
+            0
+        }
+        ["remove", rest @ ..] => {
+            let dry_run = rest.contains(&"--dry-run");
+            let yes = rest.contains(&"--yes");
+            let ids: Vec<&str> = rest
+                .iter()
+                .copied()
+                .filter(|a| !a.starts_with("--"))
+                .collect();
+            if ids.is_empty() {
+                eprintln!("usage: apps remove <id…> [--dry-run] [--yes]");
+                return 2;
+            }
+            let mut items = Vec::new();
+            for id in &ids {
+                match apps::find(id) {
+                    Some(i) => items.push(i),
+                    None => {
+                        eprintln!("unknown app `{id}` — see `apps list`");
+                        return 2;
+                    }
+                }
+            }
+            let plan = match RemovalPlan::build(&items, &RealRunner, &paths) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("couldn't build removal plan: {}", brief(e));
+                    return 1;
+                }
+            };
+            print_plan(&plan);
+            if dry_run {
+                return 0;
+            }
+            if plan.blocker.is_some() {
+                // print_plan already explained why; just signal failure.
+                return 1;
+            }
+            if !yes {
+                println!("\nre-run with --yes to run the commands above.");
+                return 0;
+            }
+            match plan.execute(&RealRunner, false) {
+                Ok(_) => {
+                    let mut manifest = Manifest::load(&studio_core::studio_state_dir());
+                    let now = now_unix();
+                    if let Ok(id) = manifest.record(&plan, now) {
+                        let _ = manifest.save();
+                        println!("\nremoved. restore with `apps restore {id}`");
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("removal failed: {}", brief(e));
+                    1
+                }
+            }
+        }
+        ["restore", id, rest @ ..] => {
+            let yes = rest.contains(&"--yes");
+            let manifest = Manifest::load(&studio_core::studio_state_dir());
+            let Some(entry) = manifest.get(id) else {
+                eprintln!(
+                    "no removal logged with id `{id}` — see `apps restore` history in removed.toml"
+                );
+                return 2;
+            };
+            let cmds = Manifest::restore_commands(&entry);
+            if cmds.is_empty() {
+                println!("nothing to reinstall for {id} (web apps can't be auto-restored — reinstall them from the browser)");
+                return 0;
+            }
+            for c in &cmds {
+                println!("  {c}");
+            }
+            if !entry.webapps.is_empty() {
+                println!("note: web apps ({}) must be reinstalled by hand — their URL/icon weren't recorded", entry.webapps.join(", "));
+            }
+            if !yes {
+                println!("\nre-run with --yes to reinstall.");
+                return 0;
+            }
+            for c in &cmds {
+                let parts: Vec<&str> = c.split_whitespace().collect();
+                let cmd = studio_core::cmd::Cmd::new(parts[0]).args(parts[1..].iter().copied());
+                match RealRunner.run(&cmd) {
+                    Ok(o) if o.ok() => {}
+                    Ok(o) => {
+                        eprintln!("reinstall failed: {}", o.stderr.trim());
+                        return 1;
+                    }
+                    Err(e) => {
+                        eprintln!("reinstall failed: {}", brief(e));
+                        return 1;
+                    }
+                }
+            }
+            println!("restored.");
+            0
+        }
+        ["leftovers"] => {
+            let inv = Inventory::probe(&RealRunner, &paths);
+            let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+            let mut any = false;
+            for item in apps::CATALOG {
+                // Show leftover dirs for apps that are NOT installed (true cruft).
+                if inv.is_installed(item) {
+                    continue;
+                }
+                for rel in item.leftovers {
+                    let p = home.join(rel);
+                    if p.exists() {
+                        println!("  {} ({})", p.display(), item.id);
+                        any = true;
+                    }
+                }
+            }
+            if !any {
+                println!("no leftover config dirs from removed apps.");
+            }
+            0
+        }
+        _ => {
+            eprintln!("usage: apps list [--installed] [--all] | remove <id…> [--dry-run] [--yes] | restore <id> [--yes] | leftovers");
+            2
+        }
+    }
+}
+
+fn print_plan(plan: &studio_core::modules::apps::RemovalPlan) {
+    if !plan.packages.is_empty() {
+        println!("packages:  {}", plan.packages.join(" "));
+    }
+    if !plan.cascade.is_empty() {
+        println!("also removes (orphaned deps): {}", plan.cascade.join(" "));
+    }
+    if !plan.services.is_empty() {
+        println!("services (disable first):     {}", plan.services.join(", "));
+    }
+    if !plan.webapps.is_empty() {
+        println!("web apps:  {}", plan.webapps.join(", "));
+    }
+    if !plan.leftovers.is_empty() {
+        println!("leftover config dirs (kept unless you delete them):");
+        for p in &plan.leftovers {
+            println!("    {}", p.display());
+        }
+    }
+    if let Some(why) = &plan.blocker {
+        println!("\n⚠ pacman won't remove this yet:");
+        println!("    {why}");
+        println!("    resolve that dependency first, then try again.");
+    } else {
+        println!("\nwill run:");
+        for c in plan.commands() {
+            println!("  {c}");
+        }
+        println!("(pacman changes aren't git-snapshotted — this removal is logged for restore)");
+    }
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }
 
 // ── target (custom config targets, roadmap 0.8.2) ────────────────────────────

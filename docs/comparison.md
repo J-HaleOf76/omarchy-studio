@@ -11,7 +11,7 @@
 | Apply safety | confirmation prompts (bypassable via "Apply all") | apply pipeline: drift-check → snapshot → hash-guarded write → reload → **verify → rollback on failure**; Waybar crash-watchdog auto-reverts a config that kills the bar |
 | Survives `omarchy-update` | mostly — but two features edit vendored files under `~/.local/share/omarchy/default/`, which updates silently revert | always — Studio never writes into Omarchy's vendored tree; every change is a user-side override or managed block |
 | Omarchy version awareness | none (hard-coded paths) | adapter layer isolates all Omarchy paths; version probe + Omarchy 4 tracking on the roadmap |
-| Tests / CI | none | 174+ tests, clippy `-D warnings`, adapter-boundary check, CI on every push |
+| Tests / CI | none | 195+ tests, clippy `-D warnings`, adapter-boundary check, CI on every push |
 | Updates | re-download the script | built-in self-update (respects pacman/AUR-owned installs) |
 | Maintenance | stale since 2026-04 (author waiting for Omarchy 4) | active; issues and Discussions open |
 
@@ -22,9 +22,9 @@
 | Theme creation | pywal wallpaper theming ("Themarchy") | palette editor, theme fork, median-cut extraction wizard (Normal/Muted/Material), in-TUI wallhaven browser | instant theme-from-current-wallpaper one-liner (0.9.2) |
 | Community themes | 252 one-click installs | — | browser **with pre-install palette preview** (0.9.1) |
 | Keybinds | guided 3-step rebind, conflict warnings | live chord capture, conflict detection, per-bind source attribution, snapshot-backed overrides | cheatsheet export (0.9.5) |
-| Hyprland settings | 69 settings (general/decoration/input/gestures) | 16 settings with **live preview**, 6 presets, try/apply/undo | expand to ~70 incl. input & gestures, keeping live preview (0.8.1) |
-| Custom config paths | fixed paths | fixed paths | per-module target overrides + running-bar detection (0.8.2) |
-| App/webapp removal | 17 apps + 15 webapps, `pacman -Rns` | — | with **dependency-cascade preview**, service disable, leftover cleanup, and restore manifest (0.8.3) |
+| Hyprland settings | 69 settings (general/decoration/input/gestures) | 56 settings across Windows/Layout/Behavior/Decoration/Blur/Shadow/Input/Touchpad with **live preview**, presets, try/apply/undo — every keyword verified against the shipped Hyprland (0.8.1) | gesture add/remove UI |
+| Custom config paths | fixed paths | per-module target overrides + running-bar `-c/-s` detection, three-tier resolution (0.8.2) | — |
+| App/webapp removal | 17 apps + 15 webapps, `pacman -Rns --noconfirm` (bypassable "apply all") | **dependency-cascade preview**, service disable, leftover listing, restore manifest; pacman refusals surfaced as blockers, no confirm-bypass (0.8.3) | — |
 | Monitors | detect, position wizard, primary, laptop auto-off | — | same scope, snapshot-backed with verify/rollback (0.8.4) |
 | Quick tweaks | 30 toggles | subset scattered across screens | one-key catalog, every tweak individually revertible (0.8.5) |
 | Power/battery | profiles, AC/battery auto-switch, charge limits | battery charge thresholds | profiles + auto-switch with previewed root writes (0.8.6) |

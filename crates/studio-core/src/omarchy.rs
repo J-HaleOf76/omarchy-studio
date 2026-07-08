@@ -52,6 +52,15 @@ impl OmarchyPaths {
             .map(|p| p.join("hypr"))
             .unwrap_or_else(|| PathBuf::from("hypr"))
     }
+
+    /// `~/.local/share/applications` — where Omarchy drops web-app launchers
+    /// (`omarchy-webapp-install`/`-remove` hardcode `$HOME/.local/share`,
+    /// ignoring `$XDG_DATA_HOME`, so we match that exactly). `<Name>.desktop`
+    /// here with an `Exec=` that runs `omarchy-launch-webapp` is a web app.
+    pub fn applications(&self) -> PathBuf {
+        PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+            .join(".local/share/applications")
+    }
 }
 
 /// Capability probe result (spec 02 §5).
@@ -301,6 +310,15 @@ pub mod cmds {
 
     pub fn process_alive(name: &str) -> Cmd {
         Cmd::new("pgrep").arg("-x").arg(name)
+    }
+
+    // ── apps & services (spec 0.8.3) ─────────────────────────────────────────
+
+    /// Remove one or more Omarchy web-app launchers by name (deletes the
+    /// `.desktop` + icon and restarts walker). Non-interactive when names are
+    /// passed.
+    pub fn webapp_remove(names: &[String]) -> Cmd {
+        Cmd::new("omarchy-webapp-remove").args(names.iter().cloned())
     }
 }
 

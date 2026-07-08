@@ -12,6 +12,7 @@ mod logo;
 mod theme;
 mod screens {
     pub mod animations;
+    pub mod apps;
     pub mod battery;
     pub mod doctor;
     pub mod integrations;
@@ -43,6 +44,7 @@ use studio_core::omarchy::{cmds, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
 use screens::animations::{AnimAction, AnimationsScreen};
+use screens::apps::{AppsAction, AppsScreen};
 use screens::battery::{BatteryAction, BatteryScreen};
 use screens::doctor::{DoctorAction, DoctorScreen};
 use screens::integrations::{IntegrationsAction, IntegrationsScreen};
@@ -70,12 +72,13 @@ enum Screen {
     LockIdle,
     Snapshots,
     Integrations,
+    Apps,
     Battery,
     Doctor,
 }
 
 impl Screen {
-    const ALL: [Screen; 12] = [
+    const ALL: [Screen; 13] = [
         Screen::Themes,
         Screen::Wallpapers,
         Screen::Keybinds,
@@ -86,6 +89,7 @@ impl Screen {
         Screen::LockIdle,
         Screen::Snapshots,
         Screen::Integrations,
+        Screen::Apps,
         Screen::Battery,
         Screen::Doctor,
     ];
@@ -102,6 +106,7 @@ impl Screen {
             Screen::LockIdle => "Lock & Idle",
             Screen::Snapshots => "Snapshots",
             Screen::Integrations => "Integrations",
+            Screen::Apps => "Apps",
             Screen::Battery => "Power",
             Screen::Doctor => "Doctor",
         }
@@ -120,6 +125,7 @@ impl Screen {
                 | Screen::Notifications
                 | Screen::LockIdle
                 | Screen::Integrations
+                | Screen::Apps
                 | Screen::Battery
                 | Screen::Doctor
         )
@@ -154,6 +160,7 @@ struct App {
     waybar: WaybarScreen,
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
+    apps: AppsScreen,
     battery: BatteryScreen,
     doctor: DoctorScreen,
     integrations: IntegrationsScreen,
@@ -207,6 +214,7 @@ impl App {
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
+        let apps = AppsScreen::load(&paths);
         let battery = BatteryScreen::load();
         let integrations = IntegrationsScreen::load(&RealRunner);
         let mut doctor = DoctorScreen::load(&paths, &RealRunner);
@@ -249,6 +257,7 @@ impl App {
             waybar,
             notifications,
             lockidle,
+            apps,
             battery,
             doctor,
             integrations,
@@ -381,6 +390,7 @@ impl App {
             || (matches!(self.screen, Screen::Waybar) && self.waybar.is_modal())
             || (matches!(self.screen, Screen::Notifications) && self.notifications.is_modal())
             || (matches!(self.screen, Screen::LockIdle) && self.lockidle.is_modal())
+            || (matches!(self.screen, Screen::Apps) && self.apps.is_modal())
             || (matches!(self.screen, Screen::Wallpapers) && self.wallpapers.is_modal());
         if !capturing {
             match key.code {
@@ -549,6 +559,11 @@ impl App {
                     terminal,
                 } => self.launch_tool(&exec, &label, terminal),
             },
+            Screen::Apps => match self.apps.handle(key) {
+                AppsAction::None => {}
+                AppsAction::Preview(ids) => self.apps_preview(ids),
+                AppsAction::Remove(plan) => self.apps_remove(plan),
+            },
             Screen::Battery => match self.battery.handle(key) {
                 BatteryAction::None => {}
                 BatteryAction::Apply { start, end } => self.battery_apply(start, end),
@@ -622,6 +637,60 @@ impl App {
             Err(e) => {
                 self.toast = Some(Toast {
                     text: format!("couldn't switch target: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Build the removal plan for the selected apps (roadmap 0.8.3) and hand it
+    /// to the screen's confirm modal. Read-only — nothing is removed here.
+    fn apps_preview(&mut self, ids: Vec<String>) {
+        use studio_core::modules::apps::{find, RemovalPlan};
+        let items: Vec<_> = ids.iter().filter_map(|id| find(id)).collect();
+        match RemovalPlan::build(&items, &RealRunner, &self.paths) {
+            Ok(plan) if plan.is_empty() => {
+                self.toast = Some(Toast {
+                    text: "Nothing removable in that selection".into(),
+                    ok: false,
+                });
+            }
+            Ok(plan) => self.apps.open_confirm(plan),
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't build plan: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Execute a confirmed removal plan, log it for restore, and reload markers.
+    fn apps_remove(&mut self, plan: studio_core::modules::apps::RemovalPlan) {
+        use studio_core::modules::apps::Manifest;
+        match plan.execute(&RealRunner, false) {
+            Ok(_) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or_default();
+                let mut manifest = Manifest::load(&studio_core::studio_state_dir());
+                let restore = manifest
+                    .record(&plan, now)
+                    .ok()
+                    .and_then(|id| manifest.save().ok().map(|()| id));
+                self.apps.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: match restore {
+                        Some(id) => format!("Removed · restore with `apps restore {id}`"),
+                        None => "Removed".into(),
+                    },
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("removal failed: {}", brief(e)),
                     ok: false,
                 });
             }
@@ -1668,6 +1737,7 @@ impl App {
                 .wallpapers
                 .render(f, area, &self.skin, &mut self.images),
             Screen::Integrations => self.integrations.render(f, area, &self.skin),
+            Screen::Apps => self.apps.render(f, area, &self.skin),
             Screen::Battery => self.battery.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
@@ -1721,6 +1791,7 @@ impl App {
             None => match self.screen {
                 Screen::Themes => (self.themes.hint(), true),
                 Screen::Battery => (self.battery.hint(), true),
+                Screen::Apps => (self.apps.hint().into(), true),
                 _ => ("tab/1-0 switch".into(), true),
             },
         };
