@@ -34,6 +34,8 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
 
+Wondering how Studio relates to A La Carchy? See the honest, source-verified [comparison](docs/comparison.md); the gaps it found drive the [v0.8 roadmap](ROADMAP.md).
+
 | | |
 |---|---|
 | ![Themes with live preview](docs/assets/themes.png) | ![Wallpaper browser with in-terminal previews](docs/assets/wallpapers.png) |
@@ -182,6 +184,8 @@ omarchy-studio doctor [--deps] [--quiet]
 | `docs/PRD.md` | Product requirements — the *what* and *why* |
 | `docs/specs/` | Build specs — the *how* (start at `00-overview.md`) |
 | `ROADMAP.md` | Milestones broken into issue-sized tasks |
+| `docs/comparison.md` | How Studio compares to A La Carchy |
+| `docs/handoff-v0.8.md` | Architecture guide for the v0.8/v0.9 milestones |
 | `crates/studio-core/` | Engine library: config model, comment-preserving parsers, apply pipeline, snapshots, Omarchy adapter |
 | `crates/omarchy-studio/` | The binary: TUI + CLI frontends |
 | `tools/termshot/` | Renders tmux captures to the README media (screenshots + tour GIF) |

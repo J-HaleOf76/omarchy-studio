@@ -73,15 +73,41 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 Sourced from user feedback on the announcement threads.
 
 - [x] 0.7.1 Auto-update: release check on launch + `update` CLI verb — download, verify, swap binary, restart; detects pacman/AUR-owned installs and defers to the package manager there
-- [ ] 0.7.2 TUI theme sync: propagate the active theme's palette to TUIs Omarchy doesn't theme (lazygit, yazi, fzf, bat, zellij, k9s…) — per-tool generators off `colors.toml`, opt-in per tool, re-asserted by the `theme-set` hook
-- [ ] 0.7.3 Apps & services manager: list installed apps/web-apps/services, remove them together with their launcher shortcuts (.desktop entries) and leftover config; systemd user/system unit disable with preview
-- [ ] 0.7.4 Video walkthrough: scripted asciinema/screen capture of an install-to-riced session, linked from README + website
+- [ ] 0.7.2 TUI theme sync: propagate the active theme's palette to TUIs Omarchy doesn't theme (lazygit, yazi, fzf, bat, zellij, k9s…) — per-tool generators off `colors.toml`, opt-in per tool, re-asserted by the `theme-set` hook *(builds after v0.8 per handoff-v0.8 build order)*
+- [ ] 0.7.4 Video walkthrough: scripted asciinema/screen capture of an install-to-riced session, linked from README + website *(record after v0.9 — stronger demo)*
 - [x] 0.7.5 In-TUI wallhaven browser (`w` in Wallpapers): worker-thread search, sort/ratio/color-match/purity filters, cached thumbnails, download→set/keep/wizard — finishes the spec 04 §6 story 0.6.3 started
+
+*(0.7.3 apps & services manager moved to 0.8.3.)*
+
+## v0.8 — Configurator parity+ (~4 wks) — *exit: no feature reason left to reach for a-la-carchy on non-ROG hardware*
+
+Competitive milestone; full architecture in [docs/handoff-v0.8.md](docs/handoff-v0.8.md), public comparison in [docs/comparison.md](docs/comparison.md). Every task ships something the bash competition can't do (live preview, cascade preview, verify/rollback, per-change revert).
+
+- [ ] 0.8.1 Hyprland Configurator expansion: looknfeel schema 16 → ~70 settings (general/misc/decoration/**input/touchpad/gestures**), settings gain a target file (`looknfeel.conf`/`input.conf`), category tabs; keywords verified against the shipped Hyprland
+- [ ] 0.8.2 Custom config targets (community ask): `[targets]` overrides in Studio config + running-waybar `-c/-s` detection + Omarchy default, three-tier precedence; Waybar screen target picker, Doctor row, `target list/set/reset` CLI
+- [ ] 0.8.3 Apps & services manager (was 0.7.3): package/webapp removal with **dependency-cascade preview**, systemd unit disable, leftover-config listing, removal manifest + `apps restore`; no confirm-bypass mode, ever
+- [ ] 0.8.4 Monitors screen: detect/identify, positioning wizard (scaled coords + rotation), primary/workspace assignment, laptop-display auto-off watcher; monitors.conf managed block through the verify/rollback pipeline
+- [ ] 0.8.5 Tweaks catalog: one-key toggles (clock format/date, tray, logo, update icon, titles, gaps, corners, transparency, compose/caps, alt↔super, media dirs) — each routed through an existing engine, individually revertible, never touching vendored files
+- [ ] 0.8.6 Power screen expansion: power profiles (powerprofilesctl), AC/battery auto-switch (previewed udev rule), suspend/hibernate guidance; rail Battery → Power
+
+## v0.9 — Community & differentiation (~3 wks) — *exit: features no Omarchy tool has, built on the snapshot store and theme engine*
+
+- [ ] 0.9.1 Community themes browser: vendored theme list + refresh script, worker-thread `omarchy-theme-install`, **pre-install palette preview** from raw `colors.toml`, search/filter; CLI `theme community`
+- [ ] 0.9.2 Instant theme-from-wallpaper: `theme new --from-current-wallpaper [--apply]` + opt-in SUPER+SHIFT+T keybind deploy
+- [ ] 0.9.3 Zero-install trial: checksummed `curl | sh` runner for the release binary; README/website CTA
+- [ ] 0.9.4 Snapshot timeline screen: browse every change Studio ever made, colored diffs, selective restore through the apply pipeline
+- [ ] 0.9.5 Keymap cheatsheet export: effective keymap → self-contained themed HTML
+- [ ] 0.9.6 Rice migration bundle: `export-rice`/`import-rice` — replayed through the apply pipeline with verification on the target machine
+
+## Omarchy 4 readiness (continuous track)
+
+- [ ] O4.1 Omarchy version probe in the adapter; Doctor surfaces it, warns on unknown/major versions
+- [ ] O4.2 Track the `omarchy-4` branch (omarchy-shell, two-package layout) at each milestone end; spike an omarchy-shell adapter when it stabilizes
 
 ## v1.0 — Polish (~2 wks) — *exit: a stranger installs from AUR and rices start-to-finish*
 
 - [ ] 1.0.1 Profiles (bundle save/switch) — PRD Q8 may cut this
-- [ ] 1.0.2 Theme export/share + gh flow [04 §8]
+- [ ] 1.0.2 Theme export/share + gh flow [04 §8] *(partly superseded by 0.9.6 rice bundle — rescope at v1.0 start)*
 - [ ] 1.0.3 Template coverage manager + starter templates [04 §3]
 - [ ] 1.0.4 Elephant provider + first-run wizard + uninstall [02 §3.2, 10 §3–4]
 - [ ] 1.0.5 Walker styling (M8) [05 §8]
@@ -91,4 +117,4 @@ Sourced from user feedback on the announcement threads.
 
 ## Post-1.0 (unordered)
 
-GUI frontend over studio-core · remaining extraction modes · walker behavior depth · monitors/input basic forms · generic-Hyprland mode · per-module waybar colors (PRD Q5) · AC/battery hypridle profiles
+GUI frontend over studio-core · remaining extraction modes · walker behavior depth · generic-Hyprland mode · per-module waybar colors (PRD Q5) · AC/battery hypridle profiles · ASUS ROG basic tier (asusctl profiles/battery/kbd-brightness, capability-gated — needs community testing; no ASUS reference hardware)
