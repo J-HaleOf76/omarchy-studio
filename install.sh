@@ -24,7 +24,7 @@ else
     echo "=> No pre-built binary found for the latest release."
     if command -v cargo >/dev/null 2>&1; then
         echo "=> Rust toolchain detected. Building and updating from source..."
-        cargo install --git https://github.com/$REPO.git
+        cargo install --git https://github.com/$REPO.git $BIN_NAME
         INSTALL_DIR="$HOME/.cargo/bin"
         echo "=> Success! $BIN_NAME installed/updated via cargo."
     else
