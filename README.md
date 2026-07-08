@@ -126,6 +126,8 @@ omarchy-studio          # launch the full-screen cockpit
 | Key | Action |
 |---|---|
 | <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | next / previous module |
+| <kbd>Ctrl</kbd>+<kbd>j</kbd>/<kbd>k</kbd>, <kbd>Ctrl</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd> | globally cycle through modules |
+| **Mouse Click** | click rail tabs to instantly switch modules |
 | <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> | jump straight to a module |
 | <kbd>j</kbd> / <kbd>k</kbd>, arrows | move within a screen |
 | <kbd>h</kbd> / <kbd>l</kbd> | adjust the selected value |
