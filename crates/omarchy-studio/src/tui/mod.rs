@@ -377,15 +377,14 @@ impl App {
 
     fn on_mouse(&mut self, mouse: ratatui::crossterm::event::MouseEvent) {
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-            if mouse.column < 20 {
-                if mouse.row >= 1 {
-                    let visible_idx = (mouse.row - 1) as usize;
-                    let offset = self.rail_state.offset();
-                    let target = offset + visible_idx;
-                    self.jump(target);
-                }
-            }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && mouse.column < 20
+            && mouse.row >= 1
+        {
+            let visible_idx = (mouse.row - 1) as usize;
+            let offset = self.rail_state.offset();
+            let target = offset + visible_idx;
+            self.jump(target);
         }
     }
 
