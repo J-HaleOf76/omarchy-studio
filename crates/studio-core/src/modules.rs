@@ -31,6 +31,7 @@ pub mod swayosd;
 pub mod targets;
 pub mod themes;
 pub mod toggles;
+pub mod tweaks;
 pub mod update;
 pub mod wallhaven;
 pub mod wallpapers;

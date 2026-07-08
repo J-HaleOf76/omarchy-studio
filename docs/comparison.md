@@ -26,7 +26,7 @@
 | Custom config paths | fixed paths | per-module target overrides + running-bar `-c/-s` detection, three-tier resolution (0.8.2) | — |
 | App/webapp removal | 17 apps + 15 webapps, `pacman -Rns --noconfirm` (bypassable "apply all") | **dependency-cascade preview**, service disable, leftover listing, restore manifest; pacman refusals surfaced as blockers, no confirm-bypass (0.8.3) | — |
 | Monitors | detect, position wizard, primary, laptop auto-off | detect/identify, scale with live effective-size, disable, snapshot-backed `monitors.conf` + hotplug fallback (0.8.4) | full placement wizard + laptop auto-off |
-| Quick tweaks | 30 toggles | subset scattered across screens | one-key catalog, every tweak individually revertible (0.8.5) |
+| Quick tweaks | 30 toggles, edited in place | one-key catalog, each tweak a self-contained managed block, individually revertible with live state (0.8.5) | more tweaks slot into the registry |
 | Power/battery | profiles, AC/battery auto-switch, charge limits | battery charge thresholds | profiles + auto-switch with previewed root writes (0.8.6) |
 | Waybar | logo/clock/tray toggles | full three-lane module editor, catalog, custom-module wizard, crash watchdog | — |
 | Notifications / OSD / lock / idle | — | full editors (mako rules + DND + live test, SwayOSD, hyprlock, hypridle timeline) | — |

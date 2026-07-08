@@ -23,6 +23,7 @@ mod screens {
     pub mod notifications;
     pub mod palette_editor;
     pub mod themes;
+    pub mod tweaks;
     pub mod wallhaven;
     pub mod wallpapers;
     pub mod waybar;
@@ -56,6 +57,7 @@ use screens::monitors::{MonitorsAction, MonitorsScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
+use screens::tweaks::{TweaksAction, TweaksScreen};
 use screens::wallhaven::{BrowserAction, Then, WallhavenBrowser};
 use screens::wallpapers::{WallpaperAction, WallpapersScreen};
 use screens::waybar::{WaybarAction, WaybarScreen};
@@ -76,12 +78,13 @@ enum Screen {
     Integrations,
     Apps,
     Monitors,
+    Tweaks,
     Battery,
     Doctor,
 }
 
 impl Screen {
-    const ALL: [Screen; 14] = [
+    const ALL: [Screen; 15] = [
         Screen::Themes,
         Screen::Wallpapers,
         Screen::Keybinds,
@@ -94,6 +97,7 @@ impl Screen {
         Screen::Integrations,
         Screen::Apps,
         Screen::Monitors,
+        Screen::Tweaks,
         Screen::Battery,
         Screen::Doctor,
     ];
@@ -112,6 +116,7 @@ impl Screen {
             Screen::Integrations => "Integrations",
             Screen::Apps => "Apps",
             Screen::Monitors => "Monitors",
+            Screen::Tweaks => "Tweaks",
             Screen::Battery => "Power",
             Screen::Doctor => "Doctor",
         }
@@ -132,6 +137,7 @@ impl Screen {
                 | Screen::Integrations
                 | Screen::Apps
                 | Screen::Monitors
+                | Screen::Tweaks
                 | Screen::Battery
                 | Screen::Doctor
         )
@@ -168,6 +174,7 @@ struct App {
     lockidle: LockIdleScreen,
     apps: AppsScreen,
     monitors: MonitorsScreen,
+    tweaks: TweaksScreen,
     battery: BatteryScreen,
     doctor: DoctorScreen,
     integrations: IntegrationsScreen,
@@ -223,6 +230,7 @@ impl App {
         let lockidle = LockIdleScreen::load(&paths);
         let apps = AppsScreen::load(&paths);
         let monitors = MonitorsScreen::load(&paths);
+        let tweaks = TweaksScreen::load(&paths);
         let battery = BatteryScreen::load();
         let integrations = IntegrationsScreen::load(&RealRunner);
         let mut doctor = DoctorScreen::load(&paths, &RealRunner);
@@ -267,6 +275,7 @@ impl App {
             lockidle,
             apps,
             monitors,
+            tweaks,
             battery,
             doctor,
             integrations,
@@ -577,6 +586,24 @@ impl App {
                 MonitorsAction::None => {}
                 MonitorsAction::Identify => self.monitors_identify(),
                 MonitorsAction::Save(layout) => self.monitors_save(layout),
+            },
+            Screen::Tweaks => match self.tweaks.handle(key) {
+                TweaksAction::None => {}
+                TweaksAction::Applied { label, on, reload } => {
+                    if reload {
+                        let _ = RealRunner.run(&cmds::hypr_reload());
+                    }
+                    self.toast = Some(Toast {
+                        text: format!("{label} {}", if on { "on" } else { "off" }),
+                        ok: true,
+                    });
+                }
+                TweaksAction::Failed(msg) => {
+                    self.toast = Some(Toast {
+                        text: msg,
+                        ok: false,
+                    });
+                }
             },
             Screen::Battery => match self.battery.handle(key) {
                 BatteryAction::None => {}
@@ -1818,6 +1845,7 @@ impl App {
             Screen::Integrations => self.integrations.render(f, area, &self.skin),
             Screen::Apps => self.apps.render(f, area, &self.skin),
             Screen::Monitors => self.monitors.render(f, area, &self.skin),
+            Screen::Tweaks => self.tweaks.render(f, area, &self.skin),
             Screen::Battery => self.battery.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
@@ -1873,6 +1901,7 @@ impl App {
                 Screen::Battery => (self.battery.hint(), true),
                 Screen::Apps => (self.apps.hint().into(), true),
                 Screen::Monitors => (self.monitors.hint().into(), true),
+                Screen::Tweaks => (self.tweaks.hint().into(), true),
                 _ => ("tab/1-0 switch".into(), true),
             },
         };

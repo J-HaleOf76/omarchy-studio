@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (206 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
+> **Status: alpha.** The modules below are built, tested (212 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Why
 
@@ -32,6 +32,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
 | **Apps & services** | Remove bundled apps and web apps safely: a `pacman -Rs --print` **cascade preview** shows every orphaned dependency, enabled systemd units are disabled first, and pacman's refusal to break a dependency is surfaced as a blocker (never forced). Every removal is logged so `apps restore <id>` can reinstall it. No bulk-confirm bypass | v0.8 |
 | **Monitors** | Detect displays (`hyprctl monitors -j`), identify which panel is which, adjust scale with the effective resolution shown live, disable a display — written to `monitors.conf` as a managed block with a hotplug fallback, snapshot-backed | v0.8 |
+| **Quick tweaks** | One-key reversible toggles (Caps→Escape, inactive-window transparency, screenshot/screencast folders…) — each a self-contained managed block, individually revertible, never touching Omarchy's vendored files | v0.8 |
 | **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
@@ -158,6 +159,10 @@ omarchy-studio monitor list                      # displays, modes, scale, effec
 omarchy-studio monitor identify                  # flash each monitor's name on-screen
 omarchy-studio monitor scale <name> <f> [--dry-run]
 omarchy-studio monitor apply [--dry-run]         # persist the current layout
+
+# Quick tweaks — one-key reversible toggles
+omarchy-studio tweak list                        # catalog with live on/off state
+omarchy-studio tweak <id> on | off               # e.g. caps-escape, inactive-transparency
 
 # Notifications (mako)
 omarchy-studio notif list | get <key> | set <key> <value>

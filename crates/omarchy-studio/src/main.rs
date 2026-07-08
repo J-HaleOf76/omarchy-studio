@@ -44,6 +44,7 @@ fn main() {
         ["target", rest @ ..] => target(rest),
         ["apps", rest @ ..] => apps(rest),
         ["monitor", rest @ ..] => monitor(rest),
+        ["tweak", rest @ ..] => tweak(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1551,6 +1552,62 @@ fn update(args: &[&str]) -> i32 {
                 1
             }
         },
+    }
+}
+
+// ── tweak (quick tweaks catalog, roadmap 0.8.5) ──────────────────────────────
+
+fn tweak(args: &[&str]) -> i32 {
+    use studio_core::modules::tweaks::{self, State};
+    let Some(_paths) = omarchy() else { return 4 };
+    let ctx = match tweaks::Ctx::discover() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("can't resolve paths: {}", brief(e));
+            return 1;
+        }
+    };
+
+    match args {
+        ["list"] | [] => {
+            for t in tweaks::catalog() {
+                let mark = if t.state(&ctx) == State::On {
+                    "on "
+                } else {
+                    "off"
+                };
+                println!("  [{mark}] {:<24} {}", t.id(), t.detail());
+            }
+            0
+        }
+        [id, verb @ ("on" | "off")] => {
+            let Some(t) = tweaks::find(id) else {
+                eprintln!("unknown tweak `{id}` — see `tweak list`");
+                return 2;
+            };
+            let on = *verb == "on";
+            match t.set(&ctx, on) {
+                Ok(changed) => {
+                    if changed.is_empty() {
+                        println!("{id} already {verb}");
+                    } else {
+                        println!("{id} {verb}");
+                        if t.touches_hypr() {
+                            let _ = RealRunner.run(&cmds::hypr_reload());
+                        }
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("couldn't set {id}: {}", brief(e));
+                    1
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: tweak list | <id> on|off");
+            2
+        }
     }
 }
 
