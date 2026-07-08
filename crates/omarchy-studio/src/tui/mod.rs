@@ -521,6 +521,7 @@ impl App {
             Screen::Waybar => match self.waybar.handle(key) {
                 WaybarAction::None => {}
                 WaybarAction::Apply => self.apply_waybar(),
+                WaybarAction::Retarget(path) => self.retarget_waybar(path),
             },
             Screen::Notifications => match self.notifications.handle(key) {
                 NotifAction::None => {}
@@ -591,6 +592,42 @@ impl App {
     }
 
     /// Snapshot config.jsonc, save the bar layout, restart Waybar, refresh.
+    /// Persist a Waybar config-target choice (roadmap 0.8.2) and reload the
+    /// screen from the newly-resolved file. `None` clears the override.
+    fn retarget_waybar(&mut self, path: Option<std::path::PathBuf>) {
+        use studio_core::modules::targets::Overrides;
+        let cfg = studio_core::studio_config_dir().join("config.toml");
+        let mut overrides = Overrides::load(&cfg);
+        let result = match &path {
+            Some(p) => overrides.set("waybar.config", &p.to_string_lossy()),
+            None => overrides.reset("waybar.config").map(|_| ()),
+        }
+        .and_then(|()| overrides.save());
+        match result {
+            Ok(()) => {
+                self.waybar.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: match path {
+                        Some(p) => format!(
+                            "Now editing {}",
+                            p.file_name()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| p.display().to_string())
+                        ),
+                        None => "Back to the Omarchy default config".into(),
+                    },
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("couldn't switch target: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
     fn apply_waybar(&mut self) {
         let Some(file) = self.waybar.config_path() else {
             return;

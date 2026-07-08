@@ -11,7 +11,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
+use std::path::PathBuf;
+
 use studio_core::cmd::CommandRunner;
+use studio_core::modules::targets::{self, Source};
 use studio_core::modules::waybar::{label_for, CustomSpec, WaybarConfig, LANES, MODULES};
 use studio_core::omarchy::OmarchyPaths;
 
@@ -21,6 +24,16 @@ pub enum WaybarAction {
     None,
     /// Save the config and restart Waybar (App snapshots first).
     Apply,
+    /// Point Studio at a different config target (roadmap 0.8.2): `Some(path)`
+    /// sets an override, `None` resets to the Omarchy default. App persists it.
+    Retarget(Option<PathBuf>),
+}
+
+/// A candidate config.jsonc the target picker can switch to.
+struct TargetPick {
+    path: PathBuf,
+    source: Source,
+    detail: String,
 }
 
 /// The custom-module wizard's text fields (roadmap 0.4.5).
@@ -87,6 +100,12 @@ pub struct WaybarScreen {
     picker: Option<usize>,
     /// Custom-module wizard overlay, open when adding a `custom/*` module.
     wizard: Option<Wizard>,
+    /// Which config.jsonc we're editing and why (roadmap 0.8.2).
+    target_source: Source,
+    /// Candidate config targets (override / detected / default) for the picker.
+    candidates: Vec<TargetPick>,
+    /// Target picker overlay, `Some(selected candidate index)` while open.
+    target_picker: Option<usize>,
 }
 
 impl WaybarScreen {
@@ -95,6 +114,7 @@ impl WaybarScreen {
             Ok(c) => (Some(c), None),
             Err(e) => (None, Some(friendly(&e))),
         };
+        let (target_source, candidates) = Self::resolve_targets(paths);
         Self {
             cfg,
             error,
@@ -102,7 +122,48 @@ impl WaybarScreen {
             dirty: false,
             picker: None,
             wizard: None,
+            target_source,
+            candidates,
+            target_picker: None,
         }
+    }
+
+    /// The active config target's source plus every candidate the picker offers
+    /// (override, running instances, Omarchy default) — deduped by path.
+    fn resolve_targets(paths: &OmarchyPaths) -> (Source, Vec<TargetPick>) {
+        let overrides =
+            targets::Overrides::load(&studio_core::studio_config_dir().join("config.toml"));
+        let instances = targets::waybar_instances();
+        let default = targets::default_for("waybar.config", paths).unwrap_or_default();
+        let resolved = targets::resolve_waybar_config(default.clone(), &overrides, &instances);
+
+        let mut candidates: Vec<TargetPick> = Vec::new();
+        if let Some(p) = overrides.get("waybar.config") {
+            candidates.push(TargetPick {
+                path: p,
+                source: Source::Override,
+                detail: "your saved override".into(),
+            });
+        }
+        for w in &instances {
+            if let Some(p) = &w.config {
+                if !candidates.iter().any(|c| &c.path == p) {
+                    candidates.push(TargetPick {
+                        path: p.clone(),
+                        source: Source::Detected,
+                        detail: format!("running now · pid {}", w.pid),
+                    });
+                }
+            }
+        }
+        if !candidates.iter().any(|c| c.path == default) {
+            candidates.push(TargetPick {
+                path: default,
+                source: Source::Default,
+                detail: "Omarchy default".into(),
+            });
+        }
+        (resolved.source, candidates)
     }
 
     pub fn reload(&mut self, paths: &OmarchyPaths) {
@@ -112,7 +173,16 @@ impl WaybarScreen {
     }
 
     pub fn is_modal(&self) -> bool {
-        self.picker.is_some() || self.wizard.is_some()
+        self.picker.is_some() || self.wizard.is_some() || self.target_picker.is_some()
+    }
+
+    /// Index of the currently-active target among the candidates.
+    fn active_target(&self) -> usize {
+        let current = self.cfg.as_ref().map(|c| c.path());
+        self.candidates
+            .iter()
+            .position(|c| Some(c.path.as_path()) == current)
+            .unwrap_or(0)
     }
 
     /// The (lane, module-index) pairs in display order.
@@ -145,7 +215,14 @@ impl WaybarScreen {
         if self.picker.is_some() {
             return self.handle_picker(key);
         }
+        if self.target_picker.is_some() {
+            return self.handle_target_picker(key);
+        }
         if self.cfg.is_none() {
+            // Even with no readable config, let the user retarget to a good one.
+            if matches!(key.code, KeyCode::Char('f')) && self.candidates.len() > 1 {
+                self.target_picker = Some(self.active_target());
+            }
             return WaybarAction::None;
         }
         let n = self.flat().len();
@@ -162,7 +239,35 @@ impl WaybarScreen {
             KeyCode::Char('H') | KeyCode::Char('<') => self.move_lane(-1),
             KeyCode::Char('a') => self.picker = Some(0),
             KeyCode::Char('d') | KeyCode::Char('x') => self.remove_selected(),
+            KeyCode::Char('f') if self.candidates.len() > 1 => {
+                self.target_picker = Some(self.active_target())
+            }
             KeyCode::Char('s') if self.dirty => return WaybarAction::Apply,
+            _ => {}
+        }
+        WaybarAction::None
+    }
+
+    fn handle_target_picker(&mut self, key: KeyEvent) -> WaybarAction {
+        let Some(sel) = self.target_picker.as_mut() else {
+            return WaybarAction::None;
+        };
+        match key.code {
+            KeyCode::Esc => self.target_picker = None,
+            KeyCode::Char('j') | KeyCode::Down => {
+                *sel = (*sel + 1).min(self.candidates.len().saturating_sub(1))
+            }
+            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Enter => {
+                let pick = &self.candidates[*sel];
+                // Choosing the default clears the override; anything else sets it.
+                let action = match pick.source {
+                    Source::Default => WaybarAction::Retarget(None),
+                    _ => WaybarAction::Retarget(Some(pick.path.clone())),
+                };
+                self.target_picker = None;
+                return action;
+            }
             _ => {}
         }
         WaybarAction::None
@@ -307,24 +412,38 @@ impl WaybarScreen {
 
     pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin) {
         if let Some(msg) = &self.error {
-            let p = Paragraph::new(vec![
+            let mut lines = vec![
                 Line::from(Span::styled(
                     "Can't read your Waybar config",
                     skin.accent_bold(),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(msg.clone(), skin.body())),
-            ])
-            .wrap(Wrap { trim: false });
-            f.render_widget(p, area);
+            ];
+            if self.candidates.len() > 1 {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Press f to point Studio at a different config file.",
+                    skin.dim(),
+                )));
+            }
+            f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+            if let Some(sel) = self.target_picker {
+                self.render_target_picker(f, area, skin, sel);
+            }
             return;
         }
         let Some(cfg) = &self.cfg else { return };
 
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
             .split(area);
+        self.render_target_header(f, rows[0], skin, cfg.path());
 
         let mut items: Vec<ListItem> = Vec::new();
         let mut flat_i = 0usize;
@@ -360,8 +479,8 @@ impl WaybarScreen {
                 flat_i += 1;
             }
         }
-        f.render_widget(List::new(items), rows[0]);
-        self.render_footer(f, rows[1], skin);
+        f.render_widget(List::new(items), rows[1]);
+        self.render_footer(f, rows[2], skin);
 
         if let Some(sel) = self.picker {
             self.render_picker(f, area, skin, sel);
@@ -369,6 +488,66 @@ impl WaybarScreen {
         if let Some(wiz) = &self.wizard {
             self.render_wizard(f, area, skin, wiz);
         }
+        if let Some(sel) = self.target_picker {
+            self.render_target_picker(f, area, skin, sel);
+        }
+    }
+
+    /// One-line header naming the config.jsonc we're editing and why.
+    fn render_target_header(&self, f: &mut Frame, area: Rect, skin: &Skin, path: &std::path::Path) {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let source_style = match self.target_source {
+            Source::Override => skin.accent_bold(),
+            Source::Detected => skin.accent_bold(),
+            Source::Default => skin.dim(),
+        };
+        let mut spans = vec![
+            Span::styled("  Editing ", skin.dim()),
+            Span::styled(name, skin.body()),
+            Span::styled(" · ", skin.dim()),
+            Span::styled(self.target_source.label(), source_style),
+        ];
+        if self.candidates.len() > 1 {
+            spans.push(Span::styled("   f change", skin.dim()));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+    }
+
+    fn render_target_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
+        let w = 70u16.min(area.width.saturating_sub(2));
+        let h = (self.candidates.len() as u16 + 4).min(area.height.saturating_sub(2));
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let rect = Rect::new(x, y, w, h);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(skin.accent_bold())
+            .title(" Which config? — Enter to switch, Esc to cancel ");
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+        let items: Vec<ListItem> = self
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let on = i == sel;
+                let marker = if on { "▸ " } else { "  " };
+                let name_style = if on { skin.selection() } else { skin.body() };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("{marker}{:<9}", c.source.label()),
+                        skin.accent_bold(),
+                    ),
+                    Span::styled(c.path.display().to_string(), name_style),
+                    Span::styled(format!("  ({})", c.detail), skin.dim()),
+                ]))
+            })
+            .collect();
+        f.render_widget(List::new(items), inner);
     }
 
     fn render_wizard(&self, f: &mut Frame, area: Rect, skin: &Skin, wiz: &Wizard) {
@@ -421,7 +600,7 @@ impl WaybarScreen {
         let p = Paragraph::new(vec![
             Line::from(vec![Span::styled("Bar layout", skin.dim()), dirty]),
             Line::from(Span::styled(
-                "J/K move in lane   H/L move across   a add   d remove   s apply",
+                "J/K move in lane   H/L move across   a add   d remove   f target   s apply",
                 skin.dim(),
             )),
         ]);

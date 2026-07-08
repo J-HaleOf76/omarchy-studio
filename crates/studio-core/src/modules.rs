@@ -26,6 +26,7 @@ pub mod lockidle;
 pub mod looknfeel;
 pub mod mako;
 pub mod swayosd;
+pub mod targets;
 pub mod themes;
 pub mod toggles;
 pub mod update;

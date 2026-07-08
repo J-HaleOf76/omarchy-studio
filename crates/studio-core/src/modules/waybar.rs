@@ -138,7 +138,7 @@ pub struct WaybarConfig {
     path: PathBuf,
 }
 
-fn config_path(paths: &OmarchyPaths) -> PathBuf {
+pub(crate) fn config_path(paths: &OmarchyPaths) -> PathBuf {
     paths
         .config
         .parent()
@@ -146,9 +146,19 @@ fn config_path(paths: &OmarchyPaths) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("waybar/config.jsonc"))
 }
 
+/// Resolve the `config.jsonc` Studio should edit (roadmap 0.8.2): a `[targets]`
+/// override wins, else a running Waybar's `-c`, else the Omarchy default. Stock
+/// setups get the default with zero config.
+pub fn resolve_config(paths: &OmarchyPaths) -> crate::modules::targets::Resolved {
+    use crate::modules::targets;
+    let overrides = targets::Overrides::load(&crate::studio_config_dir().join("config.toml"));
+    let instances = targets::waybar_instances();
+    targets::resolve_waybar_config(config_path(paths), &overrides, &instances)
+}
+
 impl WaybarConfig {
     pub fn load(paths: &OmarchyPaths) -> Result<Self> {
-        let path = config_path(paths);
+        let path = resolve_config(paths).path;
         let src = std::fs::read_to_string(&path).map_err(|e| StudioError::External {
             cmd: format!("read {}", path.display()),
             detail: e.to_string(),
@@ -385,6 +395,15 @@ pub(crate) fn style_path(paths: &OmarchyPaths) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("waybar/style.css"))
 }
 
+/// Resolve the `style.css` Studio should edit (roadmap 0.8.2): override, else a
+/// running Waybar's `-s`, else the Omarchy default.
+pub fn resolve_style(paths: &OmarchyPaths) -> crate::modules::targets::Resolved {
+    use crate::modules::targets;
+    let overrides = targets::Overrides::load(&crate::studio_config_dir().join("config.toml"));
+    let instances = targets::waybar_instances();
+    targets::resolve_waybar_style(style_path(paths), &overrides, &instances)
+}
+
 pub(crate) fn style_block() -> ManagedBlock {
     ManagedBlock::new("waybar-style", CommentStyle::CBlock)
 }
@@ -392,7 +411,7 @@ pub(crate) fn style_block() -> ManagedBlock {
 impl WaybarStyle {
     pub fn load(paths: &OmarchyPaths) -> Self {
         let mut s = Self::default();
-        if let Ok(text) = std::fs::read_to_string(style_path(paths)) {
+        if let Ok(text) = std::fs::read_to_string(resolve_style(paths).path) {
             if let Some(body) = style_block().extract(&text) {
                 s.font_size = grab_px(body, "font-size");
                 s.radius = grab_px(body, "border-radius");
@@ -419,7 +438,7 @@ impl WaybarStyle {
     /// Write the managed block into style.css (removed when empty). The block
     /// always lands at the end, after any `@import`. Returns the path.
     pub fn save(&self, paths: &OmarchyPaths) -> Result<PathBuf> {
-        let path = style_path(paths);
+        let path = resolve_style(paths).path;
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
         let updated = if self.is_empty() {
             style_block().remove(&existing)

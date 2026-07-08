@@ -41,6 +41,7 @@ fn main() {
         ["wallpaper", rest @ ..] => wallpaper(rest),
         ["battery", rest @ ..] => battery(rest),
         ["update", rest @ ..] => update(rest),
+        ["target", rest @ ..] => target(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -175,6 +176,25 @@ fn doctor(with_deps: bool, quiet: bool) -> i32 {
                 );
             }
             println!("    review with `omarchy-studio snapshot list`, restore with `snapshot restore <id>`");
+        }
+    }
+
+    {
+        use studio_core::modules::targets::{self, Overrides};
+        let overrides = Overrides::load(&studio_core::studio_config_dir().join("config.toml"));
+        let resolved = targets::resolve_all(&paths, &overrides);
+        if !resolved.is_empty() {
+            println!("  config targets");
+            for (spec, r) in resolved {
+                let note = if r.path.is_file() { "" } else { "  (missing)" };
+                println!(
+                    "    {:<14} {:<9} {}{}",
+                    spec.key,
+                    r.source.label(),
+                    r.path.display(),
+                    note
+                );
+            }
         }
     }
 
@@ -773,7 +793,7 @@ fn waybar(args: &[&str]) -> i32 {
 }
 
 fn waybar_style(paths: &OmarchyPaths, args: &[&str]) -> i32 {
-    use studio_core::modules::waybar::WaybarStyle;
+    use studio_core::modules::waybar::{resolve_style, WaybarStyle};
     let mut style = WaybarStyle::load(paths);
     let summary: String = match args {
         ["show"] | [] => {
@@ -818,11 +838,9 @@ fn waybar_style(paths: &OmarchyPaths, args: &[&str]) -> i32 {
         }
     };
     let store = history().ok();
-    let path = paths
-        .config
-        .parent()
-        .map(|c| c.join("waybar/style.css"))
-        .unwrap_or_default();
+    // Snapshot the file we will actually write — the resolved target, which may
+    // be a custom/relocated style.css (roadmap 0.8.2), not the default path.
+    let path = resolve_style(paths).path;
     if let Some(s) = &store {
         let _ = s.record(
             SnapshotKind::Pre,
@@ -1532,6 +1550,104 @@ fn update(args: &[&str]) -> i32 {
             }
         },
     }
+}
+
+// ── target (custom config targets, roadmap 0.8.2) ────────────────────────────
+
+fn target(args: &[&str]) -> i32 {
+    use studio_core::modules::targets::{self, Overrides};
+    let Some(paths) = omarchy() else { return 4 };
+    let config_toml = studio_core::studio_config_dir().join("config.toml");
+
+    match args {
+        ["list"] | [] => {
+            let overrides = Overrides::load(&config_toml);
+            println!("config targets");
+            for (spec, resolved) in targets::resolve_all(&paths, &overrides) {
+                let exists = if resolved.path.is_file() {
+                    ""
+                } else {
+                    "  (missing)"
+                };
+                println!(
+                    "  {:<14} {:<9} {}{}",
+                    spec.key,
+                    resolved.source.label(),
+                    resolved.path.display(),
+                    exists
+                );
+            }
+            println!();
+            println!("set an override with `target set <key> <path>` (e.g. waybar.config)");
+            0
+        }
+        ["set", key, path] => {
+            let expanded = expand_user(path);
+            if let Err(e) = targets::validate(key, &expanded) {
+                eprintln!("can't set {key}: {}", brief(e));
+                return 1;
+            }
+            let mut overrides = Overrides::load(&config_toml);
+            if let Err(e) = overrides.set(key, path) {
+                eprintln!("{}", brief(e));
+                return 2;
+            }
+            if let Err(e) = overrides.save() {
+                eprintln!("couldn't write {}: {}", config_toml.display(), brief(e));
+                return 1;
+            }
+            println!("{key} → {}", expanded.display());
+            0
+        }
+        ["reset", key] => {
+            let mut overrides = Overrides::load(&config_toml);
+            match overrides.reset(key) {
+                Ok(true) => {
+                    if let Err(e) = overrides.save() {
+                        eprintln!("couldn't write {}: {}", config_toml.display(), brief(e));
+                        return 1;
+                    }
+                    println!("{key} reset to default");
+                    0
+                }
+                Ok(false) => {
+                    println!("{key} has no override");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("{}", brief(e));
+                    2
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: target list | set <key> <path> | reset <key>");
+            2
+        }
+    }
+}
+
+/// Render a `StudioError` as its user-language line (spec 01 §4).
+fn brief(e: studio_core::StudioError) -> String {
+    use studio_core::StudioError::*;
+    match e {
+        External { detail, .. } => detail,
+        ParseFailed { hint, .. } => hint,
+        VerifyFailed { step, .. } => format!("{step} failed"),
+        MissingDependency(r) => format!("{} not available", r.id),
+        OmarchyMismatch { action, .. } => action,
+        Io(err) => err.to_string(),
+    }
+}
+
+/// Expand a leading `~/` for display and validation of a user-supplied path.
+fn expand_user(raw: &str) -> std::path::PathBuf {
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return std::path::PathBuf::from(home).join(rest);
+        }
+    }
+    std::path::PathBuf::from(raw)
 }
 
 fn wallpaper(args: &[&str]) -> i32 {

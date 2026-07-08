@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (176 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
+> **Status: alpha.** The modules below are built, tested (188 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Why
 
@@ -18,7 +18,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Keybinds** | Browse and rebind Hyprland keybindings, live capture | v0.2 |
 | **Look & Feel** | 56 Hyprland settings across Windows / Layout / Behavior / Decoration / Blur / Shadow / Input / Touchpad — live preview on every adjust, six presets, snapshot undo; input settings land in `input.conf`, the rest in `looknfeel.conf` | v0.3 · v0.8 |
 | **Animations** | Apply curated animation presets | v0.3 |
-| **Waybar** | Reorder/add/remove modules across lanes, tweak settings, font-size & radius, build custom modules — with a crash-watchdog that auto-reverts a config that kills the bar | v0.4 |
+| **Waybar** | Reorder/add/remove modules across lanes, tweak settings, font-size & radius, build custom modules — with a crash-watchdog that auto-reverts a config that kills the bar. Edits your *own* bar even when it lives outside the default path: detects a running `waybar -c/-s` and lets you point Studio anywhere (`f` in the screen, or `target set`) | v0.4 · v0.8 |
 | **Notifications (mako)** | Behavior schema (timeouts, layout, urgency rules), do-not-disturb, live sample notifications | v0.5 |
 | **OSD (swayosd)** | Volume/brightness popup geometry, percentage, margins, self-test | v0.5 |
 | **Lock & Idle** | Retime the hypridle timeline (screensaver → lock → screen-off → suspend), hyprlock avatar/blur/dim | v0.5 |
@@ -139,6 +139,11 @@ omarchy-studio waybar add <lane> <id> | remove <lane> <id> | move <id> <lane>
 omarchy-studio waybar set <path> <value>
 omarchy-studio waybar new <name> --exec <cmd> [--interval N] [--format F] [--on-click C] [--lane left|center|right]
 omarchy-studio waybar style show | font-size <n> | radius <n> | reset
+
+# Custom config targets — point Studio at a relocated config
+omarchy-studio target list                       # resolved path + source per module
+omarchy-studio target set waybar.config <path>   # override (validated on set)
+omarchy-studio target reset waybar.config        # back to the Omarchy default
 
 # Notifications (mako)
 omarchy-studio notif list | get <key> | set <key> <value>
