@@ -195,44 +195,29 @@ fn dir_writable(exe: &Path) -> bool {
 
 /// Download the release binary and rename it over `exe`. The running process
 /// keeps executing its old inode; the next start runs the new build.
-pub fn apply(fetch: &dyn Fetch, release: &Release, exe: &Path) -> Result<()> {
-    let url = release
-        .asset_url
-        .as_deref()
-        .ok_or_else(|| StudioError::External {
-            cmd: "release download".into(),
-            detail: format!(
-            "v{} ships no {ASSET} asset — update from source: git pull && cargo build --release",
-            release.version
-        ),
+pub fn apply(_fetch: &dyn Fetch, _release: &Release, _exe: &Path) -> Result<()> {
+    // TEMPORARY FIX: Delegate updates to the one-shot installer script
+    // because GitHub release binaries are currently missing.
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("curl -sL https://raw.githubusercontent.com/arino08/omarchy-studio/main/install.sh | sh")
+        // We nullify output to prevent corrupting the TUI during the update pause
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|e| StudioError::External {
+            cmd: "installer script".into(),
+            detail: e.to_string(),
         })?;
-    let bytes = fetch.get(url).map_err(|e| StudioError::External {
-        cmd: url.to_string(),
-        detail: match e {
-            FetchError::Status(code) => format!("HTTP {code}"),
-            FetchError::Network(msg) => msg,
-        },
-    })?;
-    if bytes.len() < MIN_BINARY_BYTES || !bytes.starts_with(ELF_MAGIC) {
-        return Err(StudioError::External {
-            cmd: url.to_string(),
-            detail: "downloaded asset does not look like a Linux binary — aborting".into(),
-        });
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(StudioError::External {
+            cmd: "installer script".into(),
+            detail: "Failed to update via install.sh (temporary curl fix)".into(),
+        })
     }
-    let dir = exe.parent().ok_or_else(|| StudioError::External {
-        cmd: "self-update".into(),
-        detail: format!("{} has no parent directory", exe.display()),
-    })?;
-    let name = exe.file_name().unwrap_or_default().to_string_lossy();
-    let tmp = dir.join(format!(".{name}.update"));
-    std::fs::write(&tmp, &bytes)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    }
-    std::fs::rename(&tmp, exe)?;
-    Ok(())
 }
 
 // ------------------------------------------------------------------ stamp
