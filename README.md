@@ -21,6 +21,17 @@ o m a r c h y
 
 > **Status: alpha.** The modules below are built, tested (218 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
 
+## Contents
+- [Why](#why)
+- [What works today](#what-works-today)
+- [Install](#install)
+- [Updating](#updating)
+- [Quick start — the TUI](#quick-start--the-tui)
+- [CLI reference](#cli-reference)
+- [Design pillars](#design-pillars)
+- [Repository map](#repository-map)
+- [License](#license)
+
 ## Why
 
 Omarchy's menu covers *picking* a theme; everything past that is hand-editing five config dialects across four directory trees, with no discoverability and no undo. The community solved colors six times over — nobody built the control center for the *behavioral* half: keybinds, animations, bar layout, notification behavior. Studio does both, natively, and integrates with the tools that already exist.
@@ -114,23 +125,26 @@ omarchy-studio          # launch the full-screen cockpit
 
 | Key | Action |
 |---|---|
-| `Tab` / `Shift-Tab` | next / previous module |
-| `1`–`9`, `0` | jump straight to a module |
-| `j` / `k`, arrows | move within a screen |
-| `h` / `l` | adjust the selected value |
-| `Enter` | open a picker (avatar, theme, …) |
-| `t` | (wallpapers) craft a theme from the selected image |
-| `w` | (wallpapers) browse wallhaven.cc — enter sets, `t` themes |
-| `o` | (wallpapers) open in imv / mpv |
-| `s` | save pending edits (snapshotted first) |
-| `U` | install a waiting update & restart |
-| `/` | search · `?` help · `q` quit |
+| <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | next / previous module |
+| <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> | jump straight to a module |
+| <kbd>j</kbd> / <kbd>k</kbd>, arrows | move within a screen |
+| <kbd>h</kbd> / <kbd>l</kbd> | adjust the selected value |
+| <kbd>Enter</kbd> | open a picker (avatar, theme, …) |
+| <kbd>t</kbd> | (wallpapers) craft a theme from the selected image |
+| <kbd>w</kbd> | (wallpapers) browse wallhaven.cc — enter sets, `t` themes |
+| <kbd>o</kbd> | (wallpapers) open in imv / mpv |
+| <kbd>s</kbd> | save pending edits (snapshotted first) |
+| <kbd>U</kbd> | install a waiting update & restart |
+| <kbd>/</kbd> | search · <kbd>?</kbd> help · <kbd>q</kbd> quit |
 
 Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. The one not-yet-built screen (the Snapshots browser) shows an honest "arriving in …" placeholder rather than a broken UI.
 
 ## CLI reference
 
 Everything the TUI does is scriptable. Each mutating command prints its undo hint.
+
+<details>
+<summary><strong>View full CLI reference</strong></summary>
 
 ```bash
 # Themes
@@ -218,6 +232,8 @@ omarchy-studio update [--check]
 # Health check (--quiet: terse drift report, exit 1 when something needs a look)
 omarchy-studio doctor [--deps] [--quiet]
 ```
+
+</details>
 
 ## Design pillars
 
