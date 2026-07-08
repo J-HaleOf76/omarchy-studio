@@ -165,6 +165,7 @@ struct App {
     paths: OmarchyPaths,
     skin: Skin,
     screen: Screen,
+    rail_state: ratatui::widgets::ListState,
     themes: ThemesScreen,
     keybinds: KeybindsScreen,
     looknfeel: LookFeelScreen,
@@ -266,6 +267,7 @@ impl App {
             paths,
             skin,
             screen: Screen::Themes,
+            rail_state: ratatui::widgets::ListState::default(),
             themes,
             keybinds,
             looknfeel,
@@ -368,6 +370,20 @@ impl App {
                             ok: false,
                         });
                     }
+                }
+            }
+        }
+    }
+
+    fn on_mouse(&mut self, mouse: ratatui::crossterm::event::MouseEvent) {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if mouse.column < 20 {
+                if mouse.row >= 1 {
+                    let visible_idx = (mouse.row - 1) as usize;
+                    let offset = self.rail_state.offset();
+                    let target = offset + visible_idx;
+                    self.jump(target);
                 }
             }
         }
@@ -1781,7 +1797,7 @@ impl App {
         }
     }
 
-    fn draw_rail(&self, f: &mut Frame, area: Rect) {
+    fn draw_rail(&mut self, f: &mut Frame, area: Rect) {
         let items: Vec<ListItem> = Screen::ALL
             .iter()
             .map(|s| {
@@ -1824,10 +1840,9 @@ impl App {
                 .right_aligned(),
             );
 
-        let mut state = ratatui::widgets::ListState::default();
         let selected_idx = Screen::ALL.iter().position(|s| *s == self.screen).unwrap();
-        state.select(Some(selected_idx));
-        f.render_stateful_widget(List::new(items).block(block), area, &mut state);
+        self.rail_state.select(Some(selected_idx));
+        f.render_stateful_widget(List::new(items).block(block), area, &mut self.rail_state);
     }
 
     /// The main pane: a rounded panel whose border carries the screen title
@@ -1839,7 +1854,7 @@ impl App {
         };
         let current = self.paths.current_theme_name().unwrap_or_default();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::TOP | Borders::RIGHT | Borders::BOTTOM)
             .border_type(BorderType::Rounded)
             .border_style(self.skin.border())
             .title(Line::from(Span::styled(title, self.skin.accent_bold())))
@@ -2237,6 +2252,10 @@ pub fn run() -> i32 {
             ratatui::crossterm::event::PushKeyboardEnhancementFlags(chord::enhancement_flags())
         );
     }
+    let _ = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::EnableMouseCapture
+    );
     let mut app = App::new(paths);
     let result = loop {
         if let Err(e) = terminal.draw(|f| app.draw(f)) {
@@ -2280,6 +2299,9 @@ pub fn run() -> i32 {
                     break Ok(());
                 }
             }
+            Ok(Event::Mouse(mouse)) => {
+                app.on_mouse(mouse);
+            }
             Ok(_) => {}
             Err(e) => break Err(e),
         }
@@ -2290,6 +2312,10 @@ pub fn run() -> i32 {
             ratatui::crossterm::event::PopKeyboardEnhancementFlags
         );
     }
+    let _ = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::DisableMouseCapture
+    );
     ratatui::restore();
     match result {
         // An update swapped the binary at our path: replace this process
