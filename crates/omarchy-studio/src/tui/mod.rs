@@ -302,6 +302,13 @@ impl App {
         self.update_rx = None;
         let Some(release) = found else { return };
         let version = release.version.clone();
+        if release.asset_url.is_none() {
+            self.toast = Some(Toast {
+                text: format!("v{version} is out (run `cargo install --path .` to build)"),
+                ok: true,
+            });
+            return;
+        }
         self.update = Some(release);
         if self.update_auto {
             self.update_apply();
@@ -429,6 +436,14 @@ impl App {
                     return;
                 }
                 KeyCode::BackTab => {
+                    self.cycle(-1);
+                    return;
+                }
+                KeyCode::Char('j') | KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.cycle(1);
+                    return;
+                }
+                KeyCode::Char('k') | KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.cycle(-1);
                     return;
                 }
@@ -1817,7 +1832,11 @@ impl App {
                 ))
                 .right_aligned(),
             );
-        f.render_widget(List::new(items).block(block), area);
+            
+        let mut state = ratatui::widgets::ListState::default();
+        let selected_idx = Screen::ALL.iter().position(|s| *s == self.screen).unwrap();
+        state.select(Some(selected_idx));
+        f.render_stateful_widget(List::new(items).block(block), area, &mut state);
     }
 
     /// The main pane: a rounded panel whose border carries the screen title

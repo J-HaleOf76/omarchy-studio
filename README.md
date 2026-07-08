@@ -48,6 +48,12 @@ Every change is snapshotted to a git-backed history — undo with a single comma
 
 Requires a Rust toolchain (1.96+) and an Omarchy system (Arch + Hyprland).
 
+**One-shot install:**
+```bash
+curl -sL https://raw.githubusercontent.com/arino08/omarchy-studio/main/install.sh | sh
+```
+
+**Build from source:**
 ```bash
 git clone https://github.com/arino08/omarchy-studio
 cd omarchy-studio

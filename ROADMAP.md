@@ -94,7 +94,7 @@ Competitive milestone; full architecture in [docs/handoff-v0.8.md](docs/handoff-
 
 - [ ] 0.9.1 Community themes browser: vendored theme list + refresh script, worker-thread `omarchy-theme-install`, **pre-install palette preview** from raw `colors.toml`, search/filter; CLI `theme community`
 - [ ] 0.9.2 Instant theme-from-wallpaper: `theme new --from-current-wallpaper [--apply]` + opt-in SUPER+SHIFT+T keybind deploy
-- [ ] 0.9.3 Zero-install trial: checksummed `curl | sh` runner for the release binary; README/website CTA
+- [x] 0.9.3 Zero-install trial: checksummed `curl | sh` runner for the release binary; README/website CTA
 - [ ] 0.9.4 Snapshot timeline screen: browse every change Studio ever made, colored diffs, selective restore through the apply pipeline
 - [ ] 0.9.5 Keymap cheatsheet export: effective keymap → self-contained themed HTML
 - [ ] 0.9.6 Rice migration bundle: `export-rice`/`import-rice` — replayed through the apply pipeline with verification on the target machine
