@@ -37,7 +37,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
 
-Wondering how Studio relates to A La Carchy? See the honest, source-verified [comparison](docs/comparison.md); the gaps it found drive the [v0.8 roadmap](ROADMAP.md).
+
 
 | | |
 |---|---|
