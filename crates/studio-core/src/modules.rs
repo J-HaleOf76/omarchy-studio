@@ -26,6 +26,7 @@ pub mod keybinds;
 pub mod lockidle;
 pub mod looknfeel;
 pub mod mako;
+pub mod monitors;
 pub mod swayosd;
 pub mod targets;
 pub mod themes;

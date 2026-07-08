@@ -25,7 +25,7 @@
 | Hyprland settings | 69 settings (general/decoration/input/gestures) | 56 settings across Windows/Layout/Behavior/Decoration/Blur/Shadow/Input/Touchpad with **live preview**, presets, try/apply/undo — every keyword verified against the shipped Hyprland (0.8.1) | gesture add/remove UI |
 | Custom config paths | fixed paths | per-module target overrides + running-bar `-c/-s` detection, three-tier resolution (0.8.2) | — |
 | App/webapp removal | 17 apps + 15 webapps, `pacman -Rns --noconfirm` (bypassable "apply all") | **dependency-cascade preview**, service disable, leftover listing, restore manifest; pacman refusals surfaced as blockers, no confirm-bypass (0.8.3) | — |
-| Monitors | detect, position wizard, primary, laptop auto-off | — | same scope, snapshot-backed with verify/rollback (0.8.4) |
+| Monitors | detect, position wizard, primary, laptop auto-off | detect/identify, scale with live effective-size, disable, snapshot-backed `monitors.conf` + hotplug fallback (0.8.4) | full placement wizard + laptop auto-off |
 | Quick tweaks | 30 toggles | subset scattered across screens | one-key catalog, every tweak individually revertible (0.8.5) |
 | Power/battery | profiles, AC/battery auto-switch, charge limits | battery charge thresholds | profiles + auto-switch with previewed root writes (0.8.6) |
 | Waybar | logo/clock/tray toggles | full three-lane module editor, catalog, custom-module wizard, crash watchdog | — |

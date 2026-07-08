@@ -43,6 +43,7 @@ fn main() {
         ["update", rest @ ..] => update(rest),
         ["target", rest @ ..] => target(rest),
         ["apps", rest @ ..] => apps(rest),
+        ["monitor", rest @ ..] => monitor(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1550,6 +1551,156 @@ fn update(args: &[&str]) -> i32 {
                 1
             }
         },
+    }
+}
+
+// ── monitor (displays, roadmap 0.8.4) ────────────────────────────────────────
+
+fn monitor(args: &[&str]) -> i32 {
+    use studio_core::modules::monitors as mon;
+    let Some(paths) = omarchy() else { return 4 };
+
+    let live = match mon::load(&RealRunner) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("can't read monitors (in a Hyprland session?): {}", brief(e));
+            return 1;
+        }
+    };
+
+    match args {
+        ["list"] | [] => {
+            for m in &live {
+                let (ew, eh) = m.effective_size();
+                let tags = [
+                    m.focused.then_some("focused"),
+                    m.is_laptop().then_some("laptop"),
+                    m.disabled.then_some("disabled"),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(", ");
+                println!(
+                    "{:<10} {:<22} {} @ {}x{}  scale {}  transform {}{}",
+                    m.name,
+                    m.label(),
+                    m.mode(),
+                    m.x,
+                    m.y,
+                    mon::fmt_scale(m.scale),
+                    m.transform,
+                    if tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  [{tags}]")
+                    }
+                );
+                if (ew, eh) != (m.width, m.height) {
+                    println!("           effective {ew}x{eh}");
+                }
+            }
+            0
+        }
+        ["identify"] => {
+            for (i, m) in live.iter().enumerate() {
+                let _ = RealRunner.run(&mon::identify_cmd(i, &m.name));
+            }
+            println!("flashed each monitor's name for 2s.");
+            0
+        }
+        ["scale", name, value, rest @ ..] => {
+            let dry_run = rest.contains(&"--dry-run");
+            let Ok(scale) = value.parse::<f64>() else {
+                eprintln!("scale must be a number like 1, 1.25, 1.5");
+                return 2;
+            };
+            if !live.iter().any(|m| &m.name == name) {
+                eprintln!("no monitor named `{name}` — see `monitor list`");
+                return 2;
+            }
+            let mut layout = mon::Layout::from_monitors(&live);
+            for s in &mut layout.monitors {
+                if &s.name == name {
+                    s.scale = mon::fmt_scale(scale);
+                }
+            }
+            monitor_write(
+                &paths,
+                &layout,
+                &format!("monitor scale {name} {value}"),
+                dry_run,
+            )
+        }
+        ["apply", rest @ ..] => {
+            let dry_run = rest.contains(&"--dry-run");
+            let layout = mon::Layout::from_monitors(&live);
+            monitor_write(
+                &paths,
+                &layout,
+                "monitor apply (persist current layout)",
+                dry_run,
+            )
+        }
+        _ => {
+            eprintln!(
+                "usage: monitor list | identify | scale <name> <f> [--dry-run] | apply [--dry-run]"
+            );
+            2
+        }
+    }
+}
+
+/// Render the layout into monitors.conf and (unless dry-run) snapshot, write,
+/// and reload Hyprland.
+fn monitor_write(
+    paths: &OmarchyPaths,
+    layout: &studio_core::modules::monitors::Layout,
+    summary: &str,
+    dry_run: bool,
+) -> i32 {
+    use studio_core::modules::monitors as mon;
+    let path = mon::conf_path(paths);
+    let existing = mon::read_conf(paths);
+    let updated = mon::render_conf(&existing, layout);
+    if dry_run {
+        println!("would write {}:\n", path.display());
+        println!("{}", layout.render_body());
+        return 0;
+    }
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            std::slice::from_ref(&path),
+            "monitors",
+            &[],
+        );
+    }
+    if let Err(e) = studio_core::configfs::atomic_write(&path, &updated) {
+        eprintln!("couldn't write {}: {}", path.display(), brief(e));
+        return 1;
+    }
+    let reload = RealRunner.run(&cmds::hypr_reload());
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Post,
+            summary,
+            std::slice::from_ref(&path),
+            "monitors",
+            &[],
+        );
+    }
+    match reload {
+        Ok(o) if o.ok() => {
+            println!("applied · undo from Snapshots");
+            0
+        }
+        _ => {
+            println!("wrote {} (hyprctl reload unavailable)", path.display());
+            0
+        }
     }
 }
 

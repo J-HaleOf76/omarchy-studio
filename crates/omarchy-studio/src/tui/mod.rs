@@ -19,6 +19,7 @@ mod screens {
     pub mod keybinds;
     pub mod lockidle;
     pub mod looknfeel;
+    pub mod monitors;
     pub mod notifications;
     pub mod palette_editor;
     pub mod themes;
@@ -51,6 +52,7 @@ use screens::integrations::{IntegrationsAction, IntegrationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
 use screens::lockidle::{LockIdleAction, LockIdleScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
+use screens::monitors::{MonitorsAction, MonitorsScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::themes::{ThemeAction, ThemesScreen};
@@ -73,12 +75,13 @@ enum Screen {
     Snapshots,
     Integrations,
     Apps,
+    Monitors,
     Battery,
     Doctor,
 }
 
 impl Screen {
-    const ALL: [Screen; 13] = [
+    const ALL: [Screen; 14] = [
         Screen::Themes,
         Screen::Wallpapers,
         Screen::Keybinds,
@@ -90,6 +93,7 @@ impl Screen {
         Screen::Snapshots,
         Screen::Integrations,
         Screen::Apps,
+        Screen::Monitors,
         Screen::Battery,
         Screen::Doctor,
     ];
@@ -107,6 +111,7 @@ impl Screen {
             Screen::Snapshots => "Snapshots",
             Screen::Integrations => "Integrations",
             Screen::Apps => "Apps",
+            Screen::Monitors => "Monitors",
             Screen::Battery => "Power",
             Screen::Doctor => "Doctor",
         }
@@ -126,6 +131,7 @@ impl Screen {
                 | Screen::LockIdle
                 | Screen::Integrations
                 | Screen::Apps
+                | Screen::Monitors
                 | Screen::Battery
                 | Screen::Doctor
         )
@@ -161,6 +167,7 @@ struct App {
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
     apps: AppsScreen,
+    monitors: MonitorsScreen,
     battery: BatteryScreen,
     doctor: DoctorScreen,
     integrations: IntegrationsScreen,
@@ -215,6 +222,7 @@ impl App {
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
         let apps = AppsScreen::load(&paths);
+        let monitors = MonitorsScreen::load(&paths);
         let battery = BatteryScreen::load();
         let integrations = IntegrationsScreen::load(&RealRunner);
         let mut doctor = DoctorScreen::load(&paths, &RealRunner);
@@ -258,6 +266,7 @@ impl App {
             notifications,
             lockidle,
             apps,
+            monitors,
             battery,
             doctor,
             integrations,
@@ -564,6 +573,11 @@ impl App {
                 AppsAction::Preview(ids) => self.apps_preview(ids),
                 AppsAction::Remove(plan) => self.apps_remove(plan),
             },
+            Screen::Monitors => match self.monitors.handle(key) {
+                MonitorsAction::None => {}
+                MonitorsAction::Identify => self.monitors_identify(),
+                MonitorsAction::Save(layout) => self.monitors_save(layout),
+            },
             Screen::Battery => match self.battery.handle(key) {
                 BatteryAction::None => {}
                 BatteryAction::Apply { start, end } => self.battery_apply(start, end),
@@ -695,6 +709,71 @@ impl App {
                 });
             }
         }
+    }
+
+    /// Flash each monitor's name on its physical panel (roadmap 0.8.4).
+    fn monitors_identify(&mut self) {
+        use studio_core::modules::monitors as mon;
+        match mon::load(&RealRunner) {
+            Ok(mons) => {
+                for (i, m) in mons.iter().enumerate() {
+                    let _ = RealRunner.run(&mon::identify_cmd(i, &m.name));
+                }
+                self.toast = Some(Toast {
+                    text: "Flashed each monitor's name".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("identify failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Persist an edited monitor layout to monitors.conf (managed block +
+    /// hotplug fallback), snapshot-backed, then reload Hyprland.
+    fn monitors_save(&mut self, layout: studio_core::modules::monitors::Layout) {
+        use studio_core::modules::monitors as mon;
+        let path = mon::conf_path(&self.paths);
+        let updated = mon::render_conf(&mon::read_conf(&self.paths), &layout);
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        );
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before: monitor layout change",
+                std::slice::from_ref(&path),
+                "monitors",
+                &[],
+            );
+        }
+        if let Err(e) = studio_core::configfs::atomic_write(&path, &updated) {
+            self.toast = Some(Toast {
+                text: format!("couldn't write monitors.conf: {}", brief(e)),
+                ok: false,
+            });
+            return;
+        }
+        let _ = RealRunner.run(&cmds::hypr_reload());
+        if let Ok(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Post,
+                "monitor layout change",
+                std::slice::from_ref(&path),
+                "monitors",
+                &[],
+            );
+        }
+        self.monitors.reload(&self.paths);
+        self.toast = Some(Toast {
+            text: "Saved monitor layout · undo from Snapshots".into(),
+            ok: true,
+        });
     }
 
     fn apply_waybar(&mut self) {
@@ -1738,6 +1817,7 @@ impl App {
                 .render(f, area, &self.skin, &mut self.images),
             Screen::Integrations => self.integrations.render(f, area, &self.skin),
             Screen::Apps => self.apps.render(f, area, &self.skin),
+            Screen::Monitors => self.monitors.render(f, area, &self.skin),
             Screen::Battery => self.battery.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
             other => self.draw_placeholder(f, area, other),
@@ -1792,6 +1872,7 @@ impl App {
                 Screen::Themes => (self.themes.hint(), true),
                 Screen::Battery => (self.battery.hint(), true),
                 Screen::Apps => (self.apps.hint().into(), true),
+                Screen::Monitors => (self.monitors.hint().into(), true),
                 _ => ("tab/1-0 switch".into(), true),
             },
         };
@@ -2034,20 +2115,13 @@ fn subsequence(needle: &str, hay: &str) -> bool {
 /// Biggest connected monitor as a wallhaven `atleast` floor (`3840x2160`),
 /// via `hyprctl monitors -j`. `None` outside a Hyprland session.
 fn monitor_atleast() -> Option<String> {
-    let out = RealRunner
-        .run(&studio_core::cmd::Cmd::new("hyprctl").args(["monitors", "-j"]))
-        .ok()?;
-    if !out.ok() {
-        return None;
-    }
-    let monitors: serde_json::Value = serde_json::from_str(&out.stdout).ok()?;
-    monitors
-        .as_array()?
-        .iter()
-        .filter_map(|m| {
-            let w = m.get("width")?.as_u64()?;
-            let h = m.get("height")?.as_u64()?;
-            Some((w * h, format!("{w}x{h}")))
+    let mons = studio_core::modules::monitors::load(&RealRunner).ok()?;
+    mons.iter()
+        .map(|m| {
+            (
+                m.width as u64 * m.height as u64,
+                format!("{}x{}", m.width, m.height),
+            )
         })
         .max_by_key(|(area, _)| *area)
         .map(|(_, res)| res)

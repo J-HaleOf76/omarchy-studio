@@ -4,7 +4,7 @@
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (198 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
+> **Status: alpha.** The modules below are built, tested (206 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is underway. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Why
 
@@ -31,6 +31,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Integrations** | Dependency health + companion-tool detection (Aether, Omarchist, matugen, hyprmon) with launch actions; "Open in Aether" appears in the wallpaper browser when installed | v0.6 |
 | **Power** | Battery charge thresholds on ThinkPads & friends (`charge_control_*_threshold`) — no TLP needed; CLI can persist them across reboots | v0.6 |
 | **Apps & services** | Remove bundled apps and web apps safely: a `pacman -Rs --print` **cascade preview** shows every orphaned dependency, enabled systemd units are disabled first, and pacman's refusal to break a dependency is surfaced as a blocker (never forced). Every removal is logged so `apps restore <id>` can reinstall it. No bulk-confirm bypass | v0.8 |
+| **Monitors** | Detect displays (`hyprctl monitors -j`), identify which panel is which, adjust scale with the effective resolution shown live, disable a display — written to `monitors.conf` as a managed block with a hotplug fallback, snapshot-backed | v0.8 |
 | **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
@@ -151,6 +152,12 @@ omarchy-studio apps list [--installed] [--all]   # catalog with live install mar
 omarchy-studio apps remove <id…> [--dry-run] [--yes]  # preview cascade/services, then run
 omarchy-studio apps restore <id>                 # reinstall a logged removal
 omarchy-studio apps leftovers                    # config dirs left by removed apps
+
+# Monitors
+omarchy-studio monitor list                      # displays, modes, scale, effective size
+omarchy-studio monitor identify                  # flash each monitor's name on-screen
+omarchy-studio monitor scale <name> <f> [--dry-run]
+omarchy-studio monitor apply [--dry-run]         # persist the current layout
 
 # Notifications (mako)
 omarchy-studio notif list | get <key> | set <key> <value>
