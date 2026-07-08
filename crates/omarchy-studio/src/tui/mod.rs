@@ -1784,23 +1784,10 @@ impl App {
     fn draw_rail(&self, f: &mut Frame, area: Rect) {
         let items: Vec<ListItem> = Screen::ALL
             .iter()
-            .enumerate()
-            .map(|(i, s)| {
+            .map(|s| {
                 let selected = *s == self.screen;
-                let key = if i < 9 {
-                    format!("{} ", i + 1)
-                } else if i == 9 {
-                    "0 ".to_string()
-                } else {
-                    "  ".to_string()
-                };
                 let marker =
-                    Span::styled(if selected { "▌" } else { " " }, self.skin.accent_bold());
-                let key_style = if selected {
-                    self.skin.accent_bold()
-                } else {
-                    self.skin.dim()
-                };
+                    Span::styled(if selected { "▌ " } else { "  " }, self.skin.accent_bold());
                 let label_style = if selected {
                     self.skin.accent_bold()
                 } else if s.built() {
@@ -1810,7 +1797,6 @@ impl App {
                 };
                 let row = Line::from(vec![
                     marker,
-                    Span::styled(key, key_style),
                     Span::styled(format!("{:<15}", s.label()), label_style),
                 ]);
                 let item = ListItem::new(row);
@@ -1829,6 +1815,7 @@ impl App {
                 Span::styled(" ✦ ", self.skin.accent_bold()),
                 Span::styled("Studio ", self.skin.body()),
             ]))
+            .title_bottom(Line::from(Span::styled(" ^j/^k ", self.skin.dim())).left_aligned())
             .title_bottom(
                 Line::from(Span::styled(
                     concat!(" v", env!("CARGO_PKG_VERSION"), " "),
