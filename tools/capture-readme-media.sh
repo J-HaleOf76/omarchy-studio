@@ -58,6 +58,9 @@ tmux kill-session -t $SESSION
   "$FRAMES"/07.txt:2000 "$FRAMES"/08.txt:1800 "$FRAMES"/09.txt:1600 \
   "$FRAMES"/10.txt:1600 "$FRAMES"/11.txt:1800 "$FRAMES"/12.txt:1200
 
+# Convert the GIF to a much smaller, higher-quality MP4 video
+ffmpeg -y -i docs/assets/tour.gif -movflags faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" docs/assets/tour.mp4
+
 cp "$FRAMES"/png/04.png docs/assets/themes.png
 cp "$FRAMES"/png/06.png docs/assets/wallpapers.png
 cp "$FRAMES"/png/08.png docs/assets/wizard.png
