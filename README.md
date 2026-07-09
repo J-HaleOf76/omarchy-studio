@@ -17,7 +17,7 @@ o m a r c h y
 
 **The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
 
-<video src="docs/assets/tour.mp4" autoplay loop muted playsinline style="max-width: 100%;"></video>
+![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
 > **Status: alpha.** The modules below are built, tested (218 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
 
