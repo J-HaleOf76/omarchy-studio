@@ -148,21 +148,21 @@ impl LookFeelScreen {
                 return LookFeelAction::None;
             }
             KeyCode::Char('t') => return LookFeelAction::OpenToggles,
-            // Tab is a global module-cycle chord; categories use [ and ].
-            KeyCode::Char(']') => self.switch_group(1),
-            KeyCode::Char('[') => self.switch_group(-1),
-            KeyCode::Char('j') | KeyCode::Down => {
+            // Tab / shift-tab move between the category tabs ([ ] alias them).
+            KeyCode::Tab | KeyCode::Char(']') => self.switch_group(1),
+            KeyCode::BackTab | KeyCode::Char('[') => self.switch_group(-1),
+            KeyCode::Down => {
                 self.selected = idx[(pos + 1).min(idx.len() - 1)];
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            KeyCode::Up => {
                 self.selected = idx[pos.saturating_sub(1)];
             }
-            KeyCode::Char('g') => self.selected = idx[0],
-            KeyCode::Char('G') => self.selected = idx[idx.len() - 1],
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
+            KeyCode::Home => self.selected = idx[0],
+            KeyCode::End => self.selected = idx[idx.len() - 1],
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 return self.nudge(1)
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') | KeyCode::Char(' ') => {
+            KeyCode::Left | KeyCode::Char('-') | KeyCode::Char(' ') => {
                 return self.nudge(-1)
             }
             KeyCode::Enter => return self.nudge(1),
@@ -228,8 +228,8 @@ impl LookFeelScreen {
         };
         match key.code {
             KeyCode::Esc | KeyCode::Char('t') => self.toggles = None,
-            KeyCode::Char('j') | KeyCode::Down => ov.sel = (ov.sel + 1).min(ov.rows.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => ov.sel = ov.sel.saturating_sub(1),
+            KeyCode::Down => ov.sel = (ov.sel + 1).min(ov.rows.len() - 1),
+            KeyCode::Up => ov.sel = ov.sel.saturating_sub(1),
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let id = ov.rows[ov.sel].id.clone();
                 return LookFeelAction::FlipToggle(id);
@@ -245,8 +245,8 @@ impl LookFeelScreen {
         };
         match key.code {
             KeyCode::Esc => self.picker = None,
-            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(PRESETS.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Down => *sel = (*sel + 1).min(PRESETS.len() - 1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let preset = &PRESETS[*sel];
                 self.model.apply_preset(preset);
@@ -446,7 +446,7 @@ impl LookFeelScreen {
                 save,
             ]),
             Line::from(Span::styled(
-                "h/l adjust   [ ] category   p presets   t toggles   r reset   R reset all   s save",
+                "tab category   ←→ adjust   p presets   t toggles   r reset   R reset all   s save",
                 skin.dim(),
             )),
         ])

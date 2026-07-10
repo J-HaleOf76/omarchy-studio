@@ -71,7 +71,7 @@ impl AppsScreen {
         if self.confirm.is_some() {
             "y confirm · n/Esc cancel"
         } else {
-            "j/k move · Space select · Enter preview · q back"
+            "↑↓ move · Space select · Enter preview · esc back"
         }
     }
 
@@ -81,12 +81,12 @@ impl AppsScreen {
         }
         let n = self.items.len();
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
+            KeyCode::Down if n > 0 => {
                 self.cursor = (self.cursor + 1).min(n - 1)
             }
-            KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Char('g') => self.cursor = 0,
-            KeyCode::Char('G') => self.cursor = n.saturating_sub(1),
+            KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
+            KeyCode::Home => self.cursor = 0,
+            KeyCode::End => self.cursor = n.saturating_sub(1),
             // Only installed items can be selected for removal.
             KeyCode::Char(' ') if self.installed.get(self.cursor).copied().unwrap_or(false) => {
                 self.selected[self.cursor] = !self.selected[self.cursor];

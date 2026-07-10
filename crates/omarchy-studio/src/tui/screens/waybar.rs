@@ -5,7 +5,7 @@
 //! it — all edited through the comment-preserving JSONC editor. Save restarts
 //! Waybar, snapshot-backed for undo. No JSON in sight.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
@@ -226,17 +226,19 @@ impl WaybarScreen {
             return WaybarAction::None;
         }
         let n = self.flat().len();
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
+            // Shift+↑/↓ reorders within a lane; ←/→ (or < >) moves between lanes.
+            KeyCode::Down if shift => self.move_within(1),
+            KeyCode::Up if shift => self.move_within(-1),
+            KeyCode::Right | KeyCode::Char('>') => self.move_lane(1),
+            KeyCode::Left | KeyCode::Char('<') => self.move_lane(-1),
+            KeyCode::Down if n > 0 => {
                 self.cursor = (self.cursor + 1).min(n - 1)
             }
-            KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Char('g') => self.cursor = 0,
-            KeyCode::Char('G') => self.cursor = n.saturating_sub(1),
-            KeyCode::Char('J') => self.move_within(1),
-            KeyCode::Char('K') => self.move_within(-1),
-            KeyCode::Char('L') | KeyCode::Char('>') => self.move_lane(1),
-            KeyCode::Char('H') | KeyCode::Char('<') => self.move_lane(-1),
+            KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
+            KeyCode::Home => self.cursor = 0,
+            KeyCode::End => self.cursor = n.saturating_sub(1),
             KeyCode::Char('a') => self.picker = Some(0),
             KeyCode::Char('d') | KeyCode::Char('x') => self.remove_selected(),
             KeyCode::Char('f') if self.candidates.len() > 1 => {
@@ -254,10 +256,10 @@ impl WaybarScreen {
         };
         match key.code {
             KeyCode::Esc => self.target_picker = None,
-            KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Down => {
                 *sel = (*sel + 1).min(self.candidates.len().saturating_sub(1))
             }
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let pick = &self.candidates[*sel];
                 // Choosing the default clears the override; anything else sets it.
@@ -334,8 +336,8 @@ impl WaybarScreen {
         };
         match key.code {
             KeyCode::Esc => self.picker = None,
-            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(MODULES.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Down => *sel = (*sel + 1).min(MODULES.len() - 1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let module = MODULES[*sel];
                 // add to the lane the cursor is currently in (default left)
@@ -600,7 +602,7 @@ impl WaybarScreen {
         let p = Paragraph::new(vec![
             Line::from(vec![Span::styled("Bar layout", skin.dim()), dirty]),
             Line::from(Span::styled(
-                "J/K move in lane   H/L move across   a add   d remove   f target   s apply",
+                "shift+↑↓ reorder   ←→ move across   a add   d remove   f target   s apply",
                 skin.dim(),
             )),
         ]);

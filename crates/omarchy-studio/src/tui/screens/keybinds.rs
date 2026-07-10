@@ -89,12 +89,12 @@ impl KeybindsScreen {
         }
         let n = self.binds.len();
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
+            KeyCode::Down if n > 0 => {
                 self.selected = (self.selected + 1).min(n - 1);
             }
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = n.saturating_sub(1),
+            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End => self.selected = n.saturating_sub(1),
             KeyCode::Char('x') => return self.disable_selected(),
             KeyCode::Char('r') if n > 0 => self.capturing = true,
             _ => {}
@@ -247,7 +247,7 @@ impl KeybindsScreen {
         } else {
             "No binds loaded".into()
         };
-        let help = "r rebind (press a new shortcut)   x disable   j/k move";
+        let help = "↑↓ move   r rebind (press a new shortcut)   x disable";
         let p = Paragraph::new(vec![
             Line::from(Span::styled(detail, skin.dim())),
             Line::from(Span::styled(help, skin.dim())),

@@ -109,12 +109,12 @@ impl WallpapersScreen {
 
         let n = self.w.entries.len();
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
+            KeyCode::Down if n > 0 => {
                 self.selected = (self.selected + 1).min(n - 1)
             }
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') if n > 0 => self.selected = n - 1,
+            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End if n > 0 => self.selected = n - 1,
             KeyCode::Enter if n > 0 && !self.gated() => {
                 if let Some(e) = self.selected_entry() {
                     return WallpaperAction::Set(e.path.clone());

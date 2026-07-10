@@ -85,14 +85,14 @@ impl NotificationsScreen {
         }
         let n = SETTINGS.len();
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.selected = (self.selected + 1).min(n - 1),
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = n - 1,
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
+            KeyCode::Down => self.selected = (self.selected + 1).min(n - 1),
+            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End => self.selected = n - 1,
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 self.nudge(1)
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
+            KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
             KeyCode::Enter => self.nudge(1),
             KeyCode::Char('r') => {
                 let key = self.cur().key;
@@ -141,8 +141,8 @@ impl NotificationsScreen {
         };
         match key.code {
             KeyCode::Esc => self.test_picker = None,
-            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(SAMPLE_URGENCIES.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Down => *sel = (*sel + 1).min(SAMPLE_URGENCIES.len() - 1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let urgency = SAMPLE_URGENCIES[*sel].to_string();
                 self.test_picker = None;
@@ -280,7 +280,7 @@ impl NotificationsScreen {
         let p = Paragraph::new(vec![
             Line::from(vec![Span::styled("Notifications", skin.dim()), dirty]),
             Line::from(Span::styled(
-                "h/l adjust   r reset   d DND   t test   o flash OSD   s save",
+                "←→ adjust   r reset   d DND   t test   o flash OSD   s save",
                 skin.dim(),
             )),
         ]);

@@ -271,19 +271,19 @@ impl WallhavenBrowser {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => return BrowserAction::Close,
             KeyCode::Char('/') => self.input = Some(self.query.q.clone()),
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
+            KeyCode::Down if n > 0 => {
                 self.selected = (self.selected + 1).min(n - 1);
                 self.ensure_thumb();
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            KeyCode::Up => {
                 self.selected = self.selected.saturating_sub(1);
                 self.ensure_thumb();
             }
-            KeyCode::Char('g') => {
+            KeyCode::Home => {
                 self.selected = 0;
                 self.ensure_thumb();
             }
-            KeyCode::Char('G') if n > 0 => {
+            KeyCode::End if n > 0 => {
                 self.selected = n - 1;
                 self.ensure_thumb();
             }

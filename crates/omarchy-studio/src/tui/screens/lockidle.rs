@@ -102,14 +102,14 @@ impl LockIdleScreen {
             return LockIdleAction::None;
         }
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.selected = (self.selected + 1).min(n - 1),
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = n - 1,
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
+            KeyCode::Down => self.selected = (self.selected + 1).min(n - 1),
+            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End => self.selected = n - 1,
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 self.nudge(1)
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
+            KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
             KeyCode::Enter
                 if matches!(self.rows().get(self.selected), Some(RowKind::Avatar))
                     && !self.avatars.is_empty() =>
@@ -174,8 +174,8 @@ impl LockIdleScreen {
         };
         match key.code {
             KeyCode::Esc => self.picker = None,
-            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(self.avatars.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Down => *sel = (*sel + 1).min(self.avatars.len() - 1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let choice = self.avatars[*sel].display().to_string();
                 if let Some(lock) = self.lock.as_mut() {
@@ -251,7 +251,7 @@ impl LockIdleScreen {
             Paragraph::new(vec![
                 Line::from(vec![Span::styled("Lock & Idle", skin.dim()), dirty]),
                 Line::from(Span::styled(
-                    "h/l adjust   Enter pick avatar   s save",
+                    "←→ adjust   Enter pick avatar   s save",
                     skin.dim(),
                 )),
             ]),

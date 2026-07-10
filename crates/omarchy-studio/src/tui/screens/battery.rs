@@ -90,16 +90,16 @@ impl BatteryScreen {
                 }
             }
             _ if !self.editable() => return BatteryAction::None,
-            KeyCode::Char('j') | KeyCode::Down => self.field = 1,
-            KeyCode::Char('k') | KeyCode::Up => self.field = 0,
-            KeyCode::Char('h') | KeyCode::Left => {
+            KeyCode::Down => self.field = 1,
+            KeyCode::Up => self.field = 0,
+            KeyCode::Left => {
                 if self.field == 0 {
                     self.start = self.start.saturating_sub(5);
                 } else {
                     self.end = self.end.saturating_sub(5).max(self.start + 5);
                 }
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            KeyCode::Right => {
                 if self.field == 0 {
                     self.start = (self.start + 5).min(self.end - 5);
                 } else {
@@ -124,7 +124,7 @@ impl BatteryScreen {
             " · p profile"
         };
         if self.editable() {
-            format!("j/k field · h/l adjust · s apply{profile} · r re-read")
+            format!("↑↓ field · ←→ adjust · s apply{profile} · r re-read")
         } else {
             format!("r re-read{profile}")
         }
