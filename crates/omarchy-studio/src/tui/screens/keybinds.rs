@@ -69,7 +69,7 @@ impl KeybindsScreen {
     pub fn reload(&mut self, paths: &OmarchyPaths, runner: &dyn CommandRunner) {
         let keep = self.selected;
         *self = Self::load(paths, runner);
-        self.selected = keep.min(self.binds.len().saturating_sub(1));
+        self.selected = crate::tui::ui::clamp_index(keep, self.binds.len());
     }
 
     pub fn is_capturing(&self) -> bool {
@@ -88,13 +88,10 @@ impl KeybindsScreen {
             return KeybindAction::None;
         }
         let n = self.binds.len();
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, n) {
+            return KeybindAction::None;
+        }
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
-                self.selected = (self.selected + 1).min(n - 1);
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = n.saturating_sub(1),
             KeyCode::Char('x') => return self.disable_selected(),
             KeyCode::Char('r') if n > 0 => self.capturing = true,
             _ => {}
@@ -247,7 +244,7 @@ impl KeybindsScreen {
         } else {
             "No binds loaded".into()
         };
-        let help = "r rebind (press a new shortcut)   x disable   j/k move";
+        let help = "↑↓ move   r rebind (press a new shortcut)   x disable";
         let p = Paragraph::new(vec![
             Line::from(Span::styled(detail, skin.dim())),
             Line::from(Span::styled(help, skin.dim())),
@@ -256,11 +253,7 @@ impl KeybindsScreen {
     }
 
     fn render_capture(&self, f: &mut Frame, area: Rect, skin: &Skin) {
-        let w = 46u16.min(area.width.saturating_sub(2));
-        let h = 5u16;
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 46, 5);
         f.render_widget(ratatui::widgets::Clear, rect);
         let action = self
             .selected_bind()

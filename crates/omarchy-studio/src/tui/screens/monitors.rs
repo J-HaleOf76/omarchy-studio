@@ -52,11 +52,11 @@ impl MonitorsScreen {
     pub fn reload(&mut self, paths: &OmarchyPaths) {
         let keep = self.cursor;
         *self = Self::load(paths);
-        self.cursor = keep.min(self.layout.monitors.len().saturating_sub(1));
+        self.cursor = crate::tui::ui::clamp_index(keep, self.layout.monitors.len());
     }
 
     pub fn hint(&self) -> &'static str {
-        "j/k move · +/- scale · d disable · i identify · s save"
+        "↑↓ move · +/- scale · d disable · i identify · s save"
     }
 
     fn nudge_scale(&mut self, delta: f64) {
@@ -70,12 +70,10 @@ impl MonitorsScreen {
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> MonitorsAction {
-        let n = self.layout.monitors.len();
+        if crate::tui::ui::list_nav(key.code, &mut self.cursor, self.layout.monitors.len()) {
+            return MonitorsAction::None;
+        }
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
-                self.cursor = (self.cursor + 1).min(n - 1)
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Char('+') | KeyCode::Char('=') => self.nudge_scale(0.25),
             KeyCode::Char('-') | KeyCode::Char('_') => self.nudge_scale(-0.25),
             KeyCode::Char('d') => {

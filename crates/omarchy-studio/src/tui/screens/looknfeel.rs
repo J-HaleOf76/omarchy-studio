@@ -141,28 +141,28 @@ impl LookFeelScreen {
             return self.handle_toggles(key);
         }
         let idx = self.group_indices();
-        let pos = idx.iter().position(|&i| i == self.selected).unwrap_or(0);
+        // Navigate a position *within* this group's settings, then map back to
+        // the absolute index the rest of the screen keys off.
+        let mut pos = idx.iter().position(|&i| i == self.selected).unwrap_or(0);
+        if crate::tui::ui::list_nav(key.code, &mut pos, idx.len()) {
+            if let Some(&sel) = idx.get(pos) {
+                self.selected = sel;
+            }
+            return LookFeelAction::None;
+        }
         match key.code {
             KeyCode::Char('p') => {
                 self.picker = Some(0);
                 return LookFeelAction::None;
             }
             KeyCode::Char('t') => return LookFeelAction::OpenToggles,
-            // Tab is a global module-cycle chord; categories use [ and ].
-            KeyCode::Char(']') => self.switch_group(1),
-            KeyCode::Char('[') => self.switch_group(-1),
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.selected = idx[(pos + 1).min(idx.len() - 1)];
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.selected = idx[pos.saturating_sub(1)];
-            }
-            KeyCode::Char('g') => self.selected = idx[0],
-            KeyCode::Char('G') => self.selected = idx[idx.len() - 1],
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
+            // Tab / shift-tab move between the category tabs ([ ] alias them).
+            KeyCode::Tab | KeyCode::Char(']') => self.switch_group(1),
+            KeyCode::BackTab | KeyCode::Char('[') => self.switch_group(-1),
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 return self.nudge(1)
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') | KeyCode::Char(' ') => {
+            KeyCode::Left | KeyCode::Char('-') | KeyCode::Char(' ') => {
                 return self.nudge(-1)
             }
             KeyCode::Enter => return self.nudge(1),
@@ -228,8 +228,8 @@ impl LookFeelScreen {
         };
         match key.code {
             KeyCode::Esc | KeyCode::Char('t') => self.toggles = None,
-            KeyCode::Char('j') | KeyCode::Down => ov.sel = (ov.sel + 1).min(ov.rows.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => ov.sel = ov.sel.saturating_sub(1),
+            KeyCode::Down => ov.sel = (ov.sel + 1).min(ov.rows.len() - 1),
+            KeyCode::Up => ov.sel = ov.sel.saturating_sub(1),
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let id = ov.rows[ov.sel].id.clone();
                 return LookFeelAction::FlipToggle(id);
@@ -245,8 +245,8 @@ impl LookFeelScreen {
         };
         match key.code {
             KeyCode::Esc => self.picker = None,
-            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(PRESETS.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Down => *sel = (*sel + 1).min(PRESETS.len() - 1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let preset = &PRESETS[*sel];
                 self.model.apply_preset(preset);
@@ -341,11 +341,7 @@ impl LookFeelScreen {
     }
 
     fn render_toggles(&self, f: &mut Frame, area: Rect, skin: &Skin, ov: &ToggleOverlay) {
-        let w = 48u16.min(area.width.saturating_sub(2));
-        let h = (ov.rows.len() as u16 + 2).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 48, ov.rows.len() as u16 + 2);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -376,12 +372,8 @@ impl LookFeelScreen {
     }
 
     fn render_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
-        let w = 52u16.min(area.width.saturating_sub(2));
         // each preset renders on two lines (name + blurb), plus the border.
-        let h = (PRESETS.len() as u16 * 2 + 2).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 52, PRESETS.len() as u16 * 2 + 2);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -446,7 +438,7 @@ impl LookFeelScreen {
                 save,
             ]),
             Line::from(Span::styled(
-                "h/l adjust   [ ] category   p presets   t toggles   r reset   R reset all   s save",
+                "tab category   ←→ adjust   p presets   t toggles   r reset   R reset all   s save",
                 skin.dim(),
             )),
         ])

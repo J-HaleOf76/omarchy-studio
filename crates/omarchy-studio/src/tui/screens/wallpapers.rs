@@ -108,13 +108,10 @@ impl WallpapersScreen {
         }
 
         let n = self.w.entries.len();
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, n) {
+            return WallpaperAction::None;
+        }
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
-                self.selected = (self.selected + 1).min(n - 1)
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') if n > 0 => self.selected = n - 1,
             KeyCode::Enter if n > 0 && !self.gated() => {
                 if let Some(e) = self.selected_entry() {
                     return WallpaperAction::Set(e.path.clone());

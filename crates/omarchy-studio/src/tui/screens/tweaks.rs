@@ -73,18 +73,16 @@ impl TweaksScreen {
     }
 
     pub fn hint(&self) -> &'static str {
-        "j/k move · Space toggle · q back"
+        "↑↓ move · Space toggle · esc back"
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> TweaksAction {
         let n = self.items.len();
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
-                self.cursor = (self.cursor + 1).min(n - 1)
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Char(' ') if n > 0 => return self.toggle(),
-            _ => {}
+        if crate::tui::ui::list_nav(key.code, &mut self.cursor, n) {
+            return TweaksAction::None;
+        }
+        if key.code == KeyCode::Char(' ') && n > 0 {
+            return self.toggle();
         }
         TweaksAction::None
     }

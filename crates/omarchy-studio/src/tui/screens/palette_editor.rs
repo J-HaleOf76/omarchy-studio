@@ -61,7 +61,7 @@ impl PaletteEditor {
             "type a hex colour (#rrggbb) · enter set · esc cancel".into()
         } else {
             let star = if self.dirty { " ·  unsaved" } else { "" };
-            format!("j/k move · enter edit · [ / ] darken/lighten · s save · esc cancel{star}")
+            format!("↑↓ move · enter edit · [ / ] darken/lighten · s save · esc cancel{star}")
         }
     }
 
@@ -89,11 +89,10 @@ impl PaletteEditor {
             return EditorAction::None;
         }
 
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, PALETTE_KEYS.len()) {
+            return EditorAction::None;
+        }
         match key.code {
-            Char('j') | Down => self.selected = (self.selected + 1).min(PALETTE_KEYS.len() - 1),
-            Char('k') | Up => self.selected = self.selected.saturating_sub(1),
-            Char('g') => self.selected = 0,
-            Char('G') => self.selected = PALETTE_KEYS.len() - 1,
             Enter => {
                 let cur = self
                     .working

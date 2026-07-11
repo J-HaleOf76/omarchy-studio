@@ -41,15 +41,11 @@ impl AnimationsScreen {
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> AnimAction {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.selected = (self.selected + 1).min(PRESETS.len() - 1)
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = PRESETS.len() - 1,
-            KeyCode::Enter => return AnimAction::Apply(PRESETS[self.selected].name.to_string()),
-            _ => {}
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, PRESETS.len()) {
+            return AnimAction::None;
+        }
+        if key.code == KeyCode::Enter {
+            return AnimAction::Apply(PRESETS[self.selected].name.to_string());
         }
         AnimAction::None
     }
@@ -84,7 +80,7 @@ impl AnimationsScreen {
                 skin.dim(),
             )),
             Line::from(Span::styled(
-                "j/k choose   Enter apply (live reload, undoable)",
+                "↑↓ choose   Enter apply (live reload, undoable)",
                 skin.dim(),
             )),
         ]);

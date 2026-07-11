@@ -10,6 +10,7 @@ mod chord;
 mod imagecell;
 mod logo;
 mod theme;
+mod ui;
 mod screens {
     pub mod animations;
     pub mod apps;
@@ -161,10 +162,20 @@ struct Toast {
     ok: bool,
 }
 
+/// Which pane owns keyboard input. `Nav` drives the left rail (↑/↓ move
+/// between sections, `enter` descends into the panel); `Panel` hands every
+/// non-global key to the active screen, and `esc` climbs back to `Nav`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Nav,
+    Panel,
+}
+
 struct App {
     paths: OmarchyPaths,
     skin: Skin,
     screen: Screen,
+    focus: Focus,
     rail_state: ratatui::widgets::ListState,
     themes: ThemesScreen,
     keybinds: KeybindsScreen,
@@ -267,6 +278,7 @@ impl App {
             paths,
             skin,
             screen: Screen::Themes,
+            focus: Focus::Nav,
             rail_state: ratatui::widgets::ListState::default(),
             themes,
             keybinds,
@@ -432,7 +444,10 @@ impl App {
             || (matches!(self.screen, Screen::LockIdle) && self.lockidle.is_modal())
             || (matches!(self.screen, Screen::Apps) && self.apps.is_modal())
             || (matches!(self.screen, Screen::Wallpapers) && self.wallpapers.is_modal());
+        // While a screen owns a text field / chord capture / modal, it gets
+        // every key untouched — globals and focus transitions stand down.
         if !capturing {
+            // Truly global, live in both focus modes.
             match key.code {
                 KeyCode::Char('q') => {
                     self.quit = true;
@@ -446,49 +461,39 @@ impl App {
                     self.palette = Some(CommandPalette::new(&self.paths));
                     return;
                 }
-                KeyCode::Tab => {
-                    self.cycle(1);
-                    return;
-                }
-                KeyCode::BackTab => {
-                    self.cycle(-1);
-                    return;
-                }
-                KeyCode::Char('j') | KeyCode::Down
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    self.cycle(1);
-                    return;
-                }
-                KeyCode::Char('k') | KeyCode::Up
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    self.cycle(-1);
-                    return;
-                }
-                KeyCode::Char(d @ '1'..='9') => {
-                    self.jump(d as usize - '1' as usize);
-                    return;
-                }
-                KeyCode::Char('0') => {
-                    self.jump(9);
-                    return;
-                }
                 KeyCode::Char('U') if self.update.is_some() => {
                     self.update_apply();
                     return;
                 }
                 _ => {}
             }
-        }
-        // Esc quits from the home screen, else returns there.
-        if key.code == KeyCode::Esc && !capturing {
-            if self.screen == Screen::Themes {
-                self.quit = true;
-            } else {
-                self.screen = Screen::Themes;
+
+            match self.focus {
+                // The rail owns input: ↑/↓ move between sections, digits jump,
+                // enter/tab/→ descend into the panel, esc leaves the app.
+                Focus::Nav => {
+                    match key.code {
+                        KeyCode::Up => self.cycle(-1),
+                        KeyCode::Down => self.cycle(1),
+                        KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
+                            self.focus = Focus::Panel
+                        }
+                        KeyCode::Char(d @ '1'..='9') => self.jump(d as usize - '1' as usize),
+                        KeyCode::Char('0') => self.jump(9),
+                        KeyCode::Esc => self.quit = true,
+                        _ => {}
+                    }
+                    // Nav never forwards to the active screen.
+                    return;
+                }
+                // The panel owns input; esc is the only way back to the rail.
+                Focus::Panel => {
+                    if key.code == KeyCode::Esc {
+                        self.focus = Focus::Nav;
+                        return;
+                    }
+                }
             }
-            return;
         }
 
         // Delegate to the active screen.
@@ -1797,14 +1802,23 @@ impl App {
     }
 
     fn draw_rail(&mut self, f: &mut Frame, area: Rect) {
+        // When the panel holds focus the rail is inactive: its selection reads
+        // as a muted memory of where you are, not a live cursor.
+        let active = self.focus == Focus::Nav;
+        let marker_style = if active {
+            self.skin.accent_bold()
+        } else {
+            self.skin.dim()
+        };
         let items: Vec<ListItem> = Screen::ALL
             .iter()
             .map(|s| {
                 let selected = *s == self.screen;
-                let marker =
-                    Span::styled(if selected { "▌ " } else { "  " }, self.skin.accent_bold());
-                let label_style = if selected {
+                let marker = Span::styled(if selected { "▌ " } else { "  " }, marker_style);
+                let label_style = if selected && active {
                     self.skin.accent_bold()
+                } else if selected {
+                    self.skin.dim()
                 } else if s.built() {
                     self.skin.body()
                 } else {
@@ -1815,22 +1829,28 @@ impl App {
                     Span::styled(format!("{:<15}", s.label()), label_style),
                 ]);
                 let item = ListItem::new(row);
-                if selected {
+                if selected && active {
                     item.style(ratatui::style::Style::default().bg(self.skin.sel_bg))
                 } else {
                     item
                 }
             })
             .collect();
+        let border_style = if active {
+            self.skin.border()
+        } else {
+            self.skin.dim()
+        };
+        let hint = if active { " ↑↓ · ⏎ open " } else { " ⏎ open " };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(self.skin.border())
+            .border_style(border_style)
             .title(Line::from(vec![
                 Span::styled(" ✦ ", self.skin.accent_bold()),
                 Span::styled("Studio ", self.skin.body()),
             ]))
-            .title_bottom(Line::from(Span::styled(" ^j/^k ", self.skin.dim())).left_aligned())
+            .title_bottom(Line::from(Span::styled(hint, self.skin.dim())).left_aligned())
             .title_bottom(
                 Line::from(Span::styled(
                     concat!(" v", env!("CARGO_PKG_VERSION"), " "),
@@ -1852,11 +1872,23 @@ impl App {
             None => format!(" {} ", self.screen.label()),
         };
         let current = self.paths.current_theme_name().unwrap_or_default();
+        // Grey the panel until it holds focus, so the eye lands on the rail.
+        let active = self.focus == Focus::Panel;
+        let border_style = if active {
+            self.skin.border()
+        } else {
+            self.skin.dim()
+        };
+        let title_style = if active {
+            self.skin.accent_bold()
+        } else {
+            self.skin.dim()
+        };
         let block = Block::default()
             .borders(Borders::TOP | Borders::RIGHT | Borders::BOTTOM)
             .border_type(BorderType::Rounded)
-            .border_style(self.skin.border())
-            .title(Line::from(Span::styled(title, self.skin.accent_bold())))
+            .border_style(border_style)
+            .title(Line::from(Span::styled(title, title_style)))
             .title_top(
                 Line::from(Span::styled(format!(" {current} "), self.skin.dim())).right_aligned(),
             )
@@ -1947,16 +1979,22 @@ impl App {
             );
             return;
         }
-        let (hint, show_globals) = match &self.editor {
-            Some((ed, _)) => (ed.hint(), false),
-            None => match self.screen {
-                Screen::Themes => (self.themes.hint(), true),
-                Screen::Battery => (self.battery.hint(), true),
-                Screen::Apps => (self.apps.hint().into(), true),
-                Screen::Monitors => (self.monitors.hint().into(), true),
-                Screen::Tweaks => (self.tweaks.hint().into(), true),
-                _ => ("tab/^j/^k switch".into(), true),
-            },
+        // The rail owns input → show how to drive it; otherwise the active
+        // screen's own hints, with `esc back` to climb back to the rail.
+        let (hint, show_globals) = if self.focus == Focus::Nav && self.editor.is_none() {
+            ("↑↓ move · ⏎ open".into(), true)
+        } else {
+            match &self.editor {
+                Some((ed, _)) => (ed.hint(), false),
+                None => match self.screen {
+                    Screen::Themes => (format!("{} · esc back", self.themes.hint()), true),
+                    Screen::Battery => (format!("{} · esc back", self.battery.hint()), true),
+                    Screen::Apps => (format!("{} · esc back", self.apps.hint()), true),
+                    Screen::Monitors => (format!("{} · esc back", self.monitors.hint()), true),
+                    Screen::Tweaks => (format!("{} · esc back", self.tweaks.hint()), true),
+                    _ => ("esc back".into(), true),
+                },
+            }
         };
         let mut spans: Vec<Span> = vec![Span::raw(" ")];
         let mut used = 1usize;
@@ -1998,7 +2036,7 @@ impl App {
     }
 
     fn draw_help(&self, f: &mut Frame) {
-        let area = centered(f.area(), 60, 13);
+        let area = ui::centered_rect(f.area(), 60, 13);
         f.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -2015,13 +2053,12 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
         let rows = [
-            ("1–9, 0", "jump to a module"),
-            ("tab / shift-tab", "cycle modules"),
+            ("↑ / ↓", "move (rail: between modules · panel: selection)"),
+            ("enter / tab", "enter the module panel from the rail"),
+            ("esc", "back to the rail (from rail: quit)"),
+            ("1–9, 0", "jump straight to a module"),
             ("/", "command palette (search everything)"),
-            ("j / k", "move selection"),
-            ("enter", "apply / activate"),
-            ("f", "fork the selected theme"),
-            ("esc", "back to Themes, or quit"),
+            ("←→ / +−", "adjust the selected value"),
             ("U", "install a waiting update & restart"),
             ("q", "quit"),
             ("?", "this help"),
@@ -2116,7 +2153,7 @@ impl CommandPalette {
     }
 
     fn render(&self, f: &mut Frame, skin: &Skin) {
-        let area = centered(f.area(), 56, 16);
+        let area = ui::centered_rect(f.area(), 56, 16);
         f.render_widget(Clear, area);
         let matches = self.matches();
         let count = format!(
@@ -2207,17 +2244,6 @@ fn monitor_atleast() -> Option<String> {
         })
         .max_by_key(|(area, _)| *area)
         .map(|(_, res)| res)
-}
-
-fn centered(area: Rect, w: u16, h: u16) -> Rect {
-    let w = w.min(area.width.saturating_sub(2));
-    let h = h.min(area.height.saturating_sub(2));
-    Rect {
-        x: area.x + (area.width.saturating_sub(w)) / 2,
-        y: area.y + (area.height.saturating_sub(h)) / 2,
-        width: w,
-        height: h,
-    }
 }
 
 /// Entry point: no-args launch (spec 08). Runs until quit; restores the

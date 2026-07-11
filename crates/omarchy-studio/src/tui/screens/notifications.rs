@@ -58,7 +58,7 @@ impl NotificationsScreen {
         let keep = self.selected;
         let dnd = self.dnd;
         *self = Self::load(paths);
-        self.selected = keep.min(SETTINGS.len().saturating_sub(1));
+        self.selected = crate::tui::ui::clamp_index(keep, SETTINGS.len());
         self.dnd = dnd;
     }
 
@@ -83,16 +83,14 @@ impl NotificationsScreen {
         if self.test_picker.is_some() {
             return self.handle_test_picker(key);
         }
-        let n = SETTINGS.len();
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, SETTINGS.len()) {
+            return NotifAction::None;
+        }
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.selected = (self.selected + 1).min(n - 1),
-            KeyCode::Char('k') | KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('g') => self.selected = 0,
-            KeyCode::Char('G') => self.selected = n - 1,
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 self.nudge(1)
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
+            KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
             KeyCode::Enter => self.nudge(1),
             KeyCode::Char('r') => {
                 let key = self.cur().key;
@@ -141,8 +139,8 @@ impl NotificationsScreen {
         };
         match key.code {
             KeyCode::Esc => self.test_picker = None,
-            KeyCode::Char('j') | KeyCode::Down => *sel = (*sel + 1).min(SAMPLE_URGENCIES.len() - 1),
-            KeyCode::Char('k') | KeyCode::Up => *sel = sel.saturating_sub(1),
+            KeyCode::Down => *sel = (*sel + 1).min(SAMPLE_URGENCIES.len() - 1),
+            KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let urgency = SAMPLE_URGENCIES[*sel].to_string();
                 self.test_picker = None;
@@ -280,7 +278,7 @@ impl NotificationsScreen {
         let p = Paragraph::new(vec![
             Line::from(vec![Span::styled("Notifications", skin.dim()), dirty]),
             Line::from(Span::styled(
-                "h/l adjust   r reset   d DND   t test   o flash OSD   s save",
+                "←→ adjust   r reset   d DND   t test   o flash OSD   s save",
                 skin.dim(),
             )),
         ]);
@@ -288,11 +286,7 @@ impl NotificationsScreen {
     }
 
     fn render_test_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
-        let w = 40u16.min(area.width.saturating_sub(2));
-        let h = (SAMPLE_URGENCIES.len() as u16 + 2).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 40, SAMPLE_URGENCIES.len() as u16 + 2);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)

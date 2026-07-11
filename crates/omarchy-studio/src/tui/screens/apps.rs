@@ -55,7 +55,7 @@ impl AppsScreen {
     pub fn reload(&mut self, paths: &OmarchyPaths) {
         let keep = self.cursor;
         *self = Self::load(paths);
-        self.cursor = keep.min(self.items.len().saturating_sub(1));
+        self.cursor = crate::tui::ui::clamp_index(keep, self.items.len());
     }
 
     pub fn is_modal(&self) -> bool {
@@ -71,7 +71,7 @@ impl AppsScreen {
         if self.confirm.is_some() {
             "y confirm · n/Esc cancel"
         } else {
-            "j/k move · Space select · Enter preview · q back"
+            "↑↓ move · Space select · Enter preview · esc back"
         }
     }
 
@@ -79,14 +79,10 @@ impl AppsScreen {
         if self.confirm.is_some() {
             return self.handle_confirm(key);
         }
-        let n = self.items.len();
+        if crate::tui::ui::list_nav(key.code, &mut self.cursor, self.items.len()) {
+            return AppsAction::None;
+        }
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
-                self.cursor = (self.cursor + 1).min(n - 1)
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Char('g') => self.cursor = 0,
-            KeyCode::Char('G') => self.cursor = n.saturating_sub(1),
             // Only installed items can be selected for removal.
             KeyCode::Char(' ') if self.installed.get(self.cursor).copied().unwrap_or(false) => {
                 self.selected[self.cursor] = !self.selected[self.cursor];
@@ -194,11 +190,7 @@ impl AppsScreen {
     }
 
     fn render_confirm(&self, f: &mut Frame, area: Rect, skin: &Skin, plan: &RemovalPlan) {
-        let w = 78u16.min(area.width.saturating_sub(2));
-        let h = 22u16.min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 78, 22);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)

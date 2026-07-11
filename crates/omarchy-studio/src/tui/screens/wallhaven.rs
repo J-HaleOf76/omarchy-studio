@@ -268,25 +268,13 @@ impl WallhavenBrowser {
         }
 
         let n = self.page.as_ref().map_or(0, |p| p.data.len());
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, n) {
+            self.ensure_thumb();
+            return BrowserAction::None;
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => return BrowserAction::Close,
             KeyCode::Char('/') => self.input = Some(self.query.q.clone()),
-            KeyCode::Char('j') | KeyCode::Down if n > 0 => {
-                self.selected = (self.selected + 1).min(n - 1);
-                self.ensure_thumb();
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.selected = self.selected.saturating_sub(1);
-                self.ensure_thumb();
-            }
-            KeyCode::Char('g') => {
-                self.selected = 0;
-                self.ensure_thumb();
-            }
-            KeyCode::Char('G') if n > 0 => {
-                self.selected = n - 1;
-                self.ensure_thumb();
-            }
             KeyCode::Char('n') => {
                 if let Some(p) = &self.page {
                     if p.meta.current_page < p.meta.last_page {
