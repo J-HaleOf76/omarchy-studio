@@ -64,7 +64,7 @@ impl IntegrationsScreen {
     pub fn reload(&mut self, runner: &dyn CommandRunner) {
         let keep = self.selected;
         *self = Self::load(runner);
-        self.selected = keep.min(self.rows().len().saturating_sub(1));
+        self.selected = crate::tui::ui::clamp_index(keep, self.rows().len());
     }
 
     /// Actions with a `context` for a given screen, from present tools only —
@@ -88,13 +88,10 @@ impl IntegrationsScreen {
 
     pub fn handle(&mut self, key: KeyEvent) -> IntegrationsAction {
         let n = self.rows().len();
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, n) {
+            return IntegrationsAction::None;
+        }
         match key.code {
-            KeyCode::Down if n > 0 => {
-                self.selected = (self.selected + 1).min(n - 1)
-            }
-            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Home => self.selected = 0,
-            KeyCode::End if n > 0 => self.selected = n - 1,
             KeyCode::Char('r') => return IntegrationsAction::Refresh,
             KeyCode::Enter => {
                 if let Some(Row::Tool(i)) = self.rows().get(self.selected) {

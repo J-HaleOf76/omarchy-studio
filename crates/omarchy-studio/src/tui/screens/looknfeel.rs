@@ -141,7 +141,15 @@ impl LookFeelScreen {
             return self.handle_toggles(key);
         }
         let idx = self.group_indices();
-        let pos = idx.iter().position(|&i| i == self.selected).unwrap_or(0);
+        // Navigate a position *within* this group's settings, then map back to
+        // the absolute index the rest of the screen keys off.
+        let mut pos = idx.iter().position(|&i| i == self.selected).unwrap_or(0);
+        if crate::tui::ui::list_nav(key.code, &mut pos, idx.len()) {
+            if let Some(&sel) = idx.get(pos) {
+                self.selected = sel;
+            }
+            return LookFeelAction::None;
+        }
         match key.code {
             KeyCode::Char('p') => {
                 self.picker = Some(0);
@@ -151,14 +159,6 @@ impl LookFeelScreen {
             // Tab / shift-tab move between the category tabs ([ ] alias them).
             KeyCode::Tab | KeyCode::Char(']') => self.switch_group(1),
             KeyCode::BackTab | KeyCode::Char('[') => self.switch_group(-1),
-            KeyCode::Down => {
-                self.selected = idx[(pos + 1).min(idx.len() - 1)];
-            }
-            KeyCode::Up => {
-                self.selected = idx[pos.saturating_sub(1)];
-            }
-            KeyCode::Home => self.selected = idx[0],
-            KeyCode::End => self.selected = idx[idx.len() - 1],
             KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 return self.nudge(1)
             }
@@ -341,11 +341,7 @@ impl LookFeelScreen {
     }
 
     fn render_toggles(&self, f: &mut Frame, area: Rect, skin: &Skin, ov: &ToggleOverlay) {
-        let w = 48u16.min(area.width.saturating_sub(2));
-        let h = (ov.rows.len() as u16 + 2).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 48, ov.rows.len() as u16 + 2);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -376,12 +372,8 @@ impl LookFeelScreen {
     }
 
     fn render_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
-        let w = 52u16.min(area.width.saturating_sub(2));
         // each preset renders on two lines (name + blurb), plus the border.
-        let h = (PRESETS.len() as u16 * 2 + 2).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 52, PRESETS.len() as u16 * 2 + 2);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)

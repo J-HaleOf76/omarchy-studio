@@ -89,11 +89,10 @@ impl PaletteEditor {
             return EditorAction::None;
         }
 
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, PALETTE_KEYS.len()) {
+            return EditorAction::None;
+        }
         match key.code {
-            Down => self.selected = (self.selected + 1).min(PALETTE_KEYS.len() - 1),
-            Up => self.selected = self.selected.saturating_sub(1),
-            Home => self.selected = 0,
-            End => self.selected = PALETTE_KEYS.len() - 1,
             Enter => {
                 let cur = self
                     .working

@@ -58,7 +58,7 @@ impl NotificationsScreen {
         let keep = self.selected;
         let dnd = self.dnd;
         *self = Self::load(paths);
-        self.selected = keep.min(SETTINGS.len().saturating_sub(1));
+        self.selected = crate::tui::ui::clamp_index(keep, SETTINGS.len());
         self.dnd = dnd;
     }
 
@@ -83,12 +83,10 @@ impl NotificationsScreen {
         if self.test_picker.is_some() {
             return self.handle_test_picker(key);
         }
-        let n = SETTINGS.len();
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, SETTINGS.len()) {
+            return NotifAction::None;
+        }
         match key.code {
-            KeyCode::Down => self.selected = (self.selected + 1).min(n - 1),
-            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Home => self.selected = 0,
-            KeyCode::End => self.selected = n - 1,
             KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
                 self.nudge(1)
             }
@@ -288,11 +286,7 @@ impl NotificationsScreen {
     }
 
     fn render_test_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
-        let w = 40u16.min(area.width.saturating_sub(2));
-        let h = (SAMPLE_URGENCIES.len() as u16 + 2).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 40, SAMPLE_URGENCIES.len() as u16 + 2);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)

@@ -519,11 +519,7 @@ impl WaybarScreen {
     }
 
     fn render_target_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
-        let w = 70u16.min(area.width.saturating_sub(2));
-        let h = (self.candidates.len() as u16 + 4).min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 70, self.candidates.len() as u16 + 4);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -553,11 +549,7 @@ impl WaybarScreen {
     }
 
     fn render_wizard(&self, f: &mut Frame, area: Rect, skin: &Skin, wiz: &Wizard) {
-        let w = 60u16.min(area.width.saturating_sub(2));
-        let h = 15u16.min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 60, 15);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -610,11 +602,7 @@ impl WaybarScreen {
     }
 
     fn render_picker(&self, f: &mut Frame, area: Rect, skin: &Skin, sel: usize) {
-        let w = 56u16.min(area.width.saturating_sub(2));
-        let h = 16u16.min(area.height.saturating_sub(2));
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let rect = Rect::new(x, y, w, h);
+        let rect = crate::tui::ui::centered_rect(area, 56, 16);
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)

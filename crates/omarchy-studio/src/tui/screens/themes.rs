@@ -128,13 +128,10 @@ impl ThemesScreen {
         }
 
         let visible_len = self.visible().len();
+        if crate::tui::ui::list_nav(key.code, &mut self.selected, visible_len) {
+            return ThemeAction::None;
+        }
         match key.code {
-            Down if visible_len > 0 => {
-                self.selected = (self.selected + 1).min(visible_len - 1)
-            }
-            Up => self.selected = self.selected.saturating_sub(1),
-            Home => self.selected = 0,
-            End => self.selected = visible_len.saturating_sub(1),
             Enter => {
                 if let Some(slug) = self.selected_slug() {
                     return ThemeAction::Apply(slug);

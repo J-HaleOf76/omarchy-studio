@@ -10,6 +10,7 @@ mod chord;
 mod imagecell;
 mod logo;
 mod theme;
+mod ui;
 mod screens {
     pub mod animations;
     pub mod apps;
@@ -2035,7 +2036,7 @@ impl App {
     }
 
     fn draw_help(&self, f: &mut Frame) {
-        let area = centered(f.area(), 60, 13);
+        let area = ui::centered_rect(f.area(), 60, 13);
         f.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -2152,7 +2153,7 @@ impl CommandPalette {
     }
 
     fn render(&self, f: &mut Frame, skin: &Skin) {
-        let area = centered(f.area(), 56, 16);
+        let area = ui::centered_rect(f.area(), 56, 16);
         f.render_widget(Clear, area);
         let matches = self.matches();
         let count = format!(
@@ -2243,17 +2244,6 @@ fn monitor_atleast() -> Option<String> {
         })
         .max_by_key(|(area, _)| *area)
         .map(|(_, res)| res)
-}
-
-fn centered(area: Rect, w: u16, h: u16) -> Rect {
-    let w = w.min(area.width.saturating_sub(2));
-    let h = h.min(area.height.saturating_sub(2));
-    Rect {
-        x: area.x + (area.width.saturating_sub(w)) / 2,
-        y: area.y + (area.height.saturating_sub(h)) / 2,
-        width: w,
-        height: h,
-    }
 }
 
 /// Entry point: no-args launch (spec 08). Runs until quit; restores the
