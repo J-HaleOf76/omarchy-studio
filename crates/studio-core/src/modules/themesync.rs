@@ -1,0 +1,431 @@
+//! Theme sync (roadmap 0.7.2): propagate the active Omarchy palette to the
+//! terminal tools Omarchy itself doesn't theme (fzf, lazygit, …).
+//!
+//! Each tool is **opt-in**. Studio never rewrites a tool's own config: it
+//! writes standalone generated files under `~/.config/omarchy-studio/themesync/`
+//! and wires them into the shell with a single managed block in `~/.bashrc`
+//! (`source …/init.sh`). The `theme-set` hook regenerates the files from the new
+//! `colors.toml`, so the tools re-tint on every `omarchy-theme-set` — the piece
+//! Omarchy's own theming leaves out.
+
+use std::path::{Path, PathBuf};
+
+use crate::cmd::find_in_path;
+use crate::configfs::{atomic_write, CommentStyle, ManagedBlock};
+use crate::error::Result;
+use crate::modules::color::Color;
+use crate::modules::themes::Palette;
+
+/// One themeable tool: how to detect it, what file to generate, and the shell
+/// line that wires that file in (emitted into `init.sh` when enabled).
+pub struct Tool {
+    pub id: &'static str,
+    pub label: &'static str,
+    /// Executable that must be on `PATH` for this tool to be worth theming.
+    pub bin: &'static str,
+    /// Generated file name inside the themesync dir.
+    filename: &'static str,
+    /// Body of the generated file, derived from the palette.
+    render: fn(&Pal) -> String,
+    /// Shell line for `init.sh` that activates the generated file (given its
+    /// absolute path). Kept POSIX so it works under bash and dash.
+    wiring: fn(&Path) -> String,
+}
+
+impl Tool {
+    /// The generated file's absolute path inside `dir`.
+    pub fn file(&self, dir: &Path) -> PathBuf {
+        dir.join(self.filename)
+    }
+
+    /// Is the tool actually installed? Theming an absent tool is harmless but
+    /// pointless — the TUI/CLI use this to mark it.
+    pub fn available(&self) -> bool {
+        find_in_path(self.bin).is_some()
+    }
+}
+
+/// Every tool Studio can sync, in display order.
+pub fn catalog() -> Vec<Tool> {
+    vec![fzf(), lazygit()]
+}
+
+pub fn find(id: &str) -> Option<Tool> {
+    catalog().into_iter().find(|t| t.id == id)
+}
+
+/// A small palette view with graceful fallbacks — every getter resolves to a
+/// concrete hex so a theme missing an optional key still yields valid output.
+pub struct Pal {
+    bg: String,
+    fg: String,
+    accent: String,
+    sel_bg: String,
+    ansi: [String; 16],
+}
+
+impl Pal {
+    pub fn from_palette(p: &Palette) -> Self {
+        let hex = |key: &str, fallback: &str| {
+            p.get(key)
+                .map(|c: Color| c.hex())
+                .unwrap_or_else(|| fallback.to_string())
+        };
+        let mut ansi: [String; 16] = Default::default();
+        // Reasonable dark defaults so a sparse palette still renders.
+        const FALLBACK: [&str; 16] = [
+            "#1a1a1a", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#dcdfe4",
+            "#5c6370", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#ffffff",
+        ];
+        for (i, slot) in ansi.iter_mut().enumerate() {
+            *slot = hex(&format!("color{i}"), FALLBACK[i]);
+        }
+        Self {
+            bg: hex("background", "#1a1a1a"),
+            fg: hex("foreground", "#dcdfe4"),
+            accent: hex("accent", "#61afef"),
+            sel_bg: hex("selection_background", "#3a3a3a"),
+            ansi,
+        }
+    }
+}
+
+// ── the shell wiring block ───────────────────────────────────────────────────
+
+/// Marker section for the one line Studio adds to `~/.bashrc`.
+fn bashrc_block() -> ManagedBlock {
+    ManagedBlock::new("themesync", CommentStyle::Hash)
+}
+
+/// Regenerate every enabled tool's file, rebuild `init.sh`, and wire it into
+/// `bashrc` — or tear the wiring down when nothing is enabled. Returns the
+/// files that changed (for snapshotting). `dir` and `bashrc` are explicit so
+/// the whole flow is testable against tempdirs.
+pub fn apply(dir: &Path, bashrc: &Path, pal: &Pal, enabled: &[String]) -> Result<Vec<PathBuf>> {
+    std::fs::create_dir_all(dir)?;
+    let mut changed = Vec::new();
+
+    // Per-tool generated files: write the enabled ones, remove the rest.
+    let mut wiring_lines = Vec::new();
+    for tool in catalog() {
+        let path = tool.file(dir);
+        if enabled.iter().any(|e| e == tool.id) {
+            let body = (tool.render)(pal);
+            if write_if_changed(&path, &body)? {
+                changed.push(path.clone());
+            }
+            wiring_lines.push((tool.wiring)(&path));
+        } else if path.exists() {
+            std::fs::remove_file(&path)?;
+            changed.push(path);
+        }
+    }
+
+    // init.sh: sourced by bashrc, activates each enabled tool.
+    let init = dir.join("init.sh");
+    if wiring_lines.is_empty() {
+        if init.exists() {
+            std::fs::remove_file(&init)?;
+            changed.push(init.clone());
+        }
+    } else {
+        let body = format!(
+            "# generated by omarchy-studio themesync — do not edit\n{}\n",
+            wiring_lines.join("\n")
+        );
+        if write_if_changed(&init, &body)? {
+            changed.push(init.clone());
+        }
+    }
+
+    // bashrc managed block: one source line, or removed when nothing's enabled.
+    let block = bashrc_block();
+    let before = std::fs::read_to_string(bashrc).unwrap_or_default();
+    let after = if wiring_lines.is_empty() {
+        block.remove(&before)
+    } else {
+        let line = format!("[ -f \"{0}\" ] && . \"{0}\"", init.display());
+        block.upsert(&before, &line)
+    };
+    if after != before {
+        atomic_write(bashrc, &after)?;
+        changed.push(bashrc.to_path_buf());
+    }
+
+    Ok(changed)
+}
+
+fn write_if_changed(path: &Path, body: &str) -> Result<bool> {
+    if std::fs::read_to_string(path).ok().as_deref() == Some(body) {
+        return Ok(false);
+    }
+    atomic_write(path, body)?;
+    Ok(true)
+}
+
+// ── opt-in config (`[themesync] tools = [...]` in Studio's config.toml) ───────
+
+/// The persisted set of enabled tool ids.
+pub struct Enabled {
+    doc: toml_edit::DocumentMut,
+    path: PathBuf,
+}
+
+impl Enabled {
+    pub fn load(config_toml: &Path) -> Self {
+        let doc = std::fs::read_to_string(config_toml)
+            .ok()
+            .and_then(|t| t.parse::<toml_edit::DocumentMut>().ok())
+            .unwrap_or_default();
+        Self {
+            doc,
+            path: config_toml.to_path_buf(),
+        }
+    }
+
+    pub fn list(&self) -> Vec<String> {
+        self.doc
+            .get("themesync")
+            .and_then(|t| t.get("tools"))
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn is_on(&self, id: &str) -> bool {
+        self.list().iter().any(|t| t == id)
+    }
+
+    /// Enable/disable a tool. Unknown ids are rejected so a typo can't silently
+    /// persist. Returns whether the set changed.
+    pub fn set(&mut self, id: &str, on: bool) -> Result<bool> {
+        if find(id).is_none() {
+            return Err(crate::StudioError::External {
+                cmd: "themesync".into(),
+                detail: format!("unknown tool `{id}` (see `themesync list`)"),
+            });
+        }
+        let mut tools = self.list();
+        let had = tools.iter().any(|t| t == id);
+        if on && !had {
+            tools.push(id.to_string());
+        } else if !on && had {
+            tools.retain(|t| t != id);
+        } else {
+            return Ok(false);
+        }
+        let mut arr = toml_edit::Array::new();
+        for t in tools {
+            arr.push(t);
+        }
+        self.doc["themesync"]["tools"] = toml_edit::value(arr);
+        Ok(true)
+    }
+
+    pub fn save(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        atomic_write(&self.path, &self.doc.to_string())
+    }
+}
+
+// ── the tools ────────────────────────────────────────────────────────────────
+
+fn fzf() -> Tool {
+    Tool {
+        id: "fzf",
+        label: "fzf",
+        bin: "fzf",
+        filename: "fzf.sh",
+        render: |p| {
+            // fzf's palette flags (fzf ≥0.35). Appends to any existing opts so
+            // the user's own FZF_DEFAULT_OPTS layout/keybinds survive.
+            let colors = format!(
+                "fg:{fg},bg:{bg},hl:{accent},\
+                 fg+:{fg},bg+:{sel},hl+:{accent},\
+                 info:{c4},border:{c8},prompt:{c2},\
+                 pointer:{accent},marker:{c3},spinner:{c5},header:{c6}",
+                fg = p.fg,
+                bg = p.bg,
+                accent = p.accent,
+                sel = p.sel_bg,
+                c2 = p.ansi[2],
+                c3 = p.ansi[3],
+                c4 = p.ansi[4],
+                c5 = p.ansi[5],
+                c6 = p.ansi[6],
+                c8 = p.ansi[8],
+            );
+            format!(
+                "# generated by omarchy-studio themesync — do not edit\n\
+                 export FZF_DEFAULT_OPTS=\"${{FZF_DEFAULT_OPTS:-}} --color={colors}\"\n"
+            )
+        },
+        wiring: |file| format!("[ -f \"{0}\" ] && . \"{0}\"", file.display()),
+    }
+}
+
+fn lazygit() -> Tool {
+    Tool {
+        id: "lazygit",
+        label: "lazygit",
+        bin: "lazygit",
+        filename: "lazygit.yml",
+        render: |p| {
+            // Standalone lazygit config carrying only gui.theme. Wired via
+            // LG_CONFIG_FILE after the user's own config so it overlays, not
+            // replaces (theme keys win, everything else is theirs).
+            format!(
+                "# generated by omarchy-studio themesync — do not edit\n\
+                 gui:\n  theme:\n\
+                 \x20   activeBorderColor:\n      - \"{accent}\"\n      - bold\n\
+                 \x20   inactiveBorderColor:\n      - \"{c8}\"\n\
+                 \x20   searchingActiveBorderColor:\n      - \"{accent}\"\n      - bold\n\
+                 \x20   optionsTextColor:\n      - \"{c4}\"\n\
+                 \x20   selectedLineBgColor:\n      - \"{sel}\"\n\
+                 \x20   cherryPickedCommitFgColor:\n      - \"{accent}\"\n\
+                 \x20   cherryPickedCommitBgColor:\n      - \"{c6}\"\n\
+                 \x20   markedBaseCommitFgColor:\n      - \"{bg}\"\n\
+                 \x20   markedBaseCommitBgColor:\n      - \"{c3}\"\n\
+                 \x20   unstagedChangesColor:\n      - \"{c1}\"\n\
+                 \x20   defaultFgColor:\n      - \"{fg}\"\n",
+                accent = p.accent,
+                fg = p.fg,
+                bg = p.bg,
+                sel = p.sel_bg,
+                c1 = p.ansi[1],
+                c3 = p.ansi[3],
+                c4 = p.ansi[4],
+                c6 = p.ansi[6],
+                c8 = p.ansi[8],
+            )
+        },
+        wiring: |file| {
+            // Comma-list: user's own config first (default path), our theme
+            // overlay second so its keys win. A missing first file is tolerated.
+            format!(
+                "export LG_CONFIG_FILE=\"$HOME/.config/lazygit/config.yml,{}\"",
+                file.display()
+            )
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_palette() -> Palette {
+        let mut toml = String::from("accent = \"#7fbbb3\"\nbackground = \"#2d353b\"\nforeground = \"#d3c6aa\"\nselection_background = \"#4f585e\"\n");
+        for i in 0..16 {
+            toml.push_str(&format!("color{i} = \"#0000{i:02x}\"\n"));
+        }
+        Palette::parse(&toml).unwrap()
+    }
+
+    #[test]
+    fn catalog_ids_are_unique_and_findable() {
+        let cat = catalog();
+        for t in &cat {
+            assert!(find(t.id).is_some());
+            assert!(!t.label.is_empty());
+        }
+        let ids: Vec<_> = cat.iter().map(|t| t.id).collect();
+        let mut deduped = ids.clone();
+        deduped.sort_unstable();
+        deduped.dedup();
+        assert_eq!(ids.len(), deduped.len(), "duplicate tool id");
+    }
+
+    #[test]
+    fn fzf_output_carries_theme_colors_and_preserves_existing_opts() {
+        let pal = Pal::from_palette(&sample_palette());
+        let out = (fzf().render)(&pal);
+        assert!(out.contains("--color="));
+        assert!(out.contains("bg:#2d353b"));
+        assert!(out.contains("hl:#7fbbb3"));
+        // must append, not clobber, the user's own opts
+        assert!(out.contains("${FZF_DEFAULT_OPTS:-}"));
+    }
+
+    #[test]
+    fn lazygit_output_has_theme_block_with_expected_shape() {
+        let pal = Pal::from_palette(&sample_palette());
+        let out = (lazygit().render)(&pal);
+        // top-level gui.theme with 2-space nesting lazygit expects
+        assert!(out.contains("gui:\n  theme:\n"));
+        assert!(out.contains("    activeBorderColor:\n      - \"#7fbbb3\"\n      - bold\n"));
+        assert!(out.contains("    defaultFgColor:\n      - \"#d3c6aa\"\n"));
+        // no tabs — YAML forbids them for indentation
+        assert!(!out.contains('\t'));
+        // every list value is a quoted hex or a bare attribute
+        for line in out.lines().filter(|l| l.trim_start().starts_with("- ")) {
+            let v = line.trim_start().trim_start_matches("- ");
+            assert!(
+                v == "bold" || (v.starts_with("\"#") && v.ends_with('"')),
+                "unexpected lazygit theme value: {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_writes_files_and_wires_bashrc_then_tears_down() {
+        let tmp = std::env::temp_dir().join(format!("themesync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let dir = tmp.join("themesync");
+        let bashrc = tmp.join(".bashrc");
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(&bashrc, "# my bashrc\nexport PATH=$PATH\n").unwrap();
+        let pal = Pal::from_palette(&sample_palette());
+
+        // enable fzf → file written, bashrc gets the managed source line
+        let changed = apply(&dir, &bashrc, &pal, &["fzf".into()]).unwrap();
+        assert!(changed.iter().any(|p| p.ends_with("fzf.sh")));
+        assert!(dir.join("fzf.sh").exists());
+        assert!(!dir.join("lazygit.yml").exists());
+        let rc = std::fs::read_to_string(&bashrc).unwrap();
+        assert!(rc.contains("omarchy-studio:themesync"));
+        assert!(rc.contains("init.sh"));
+        assert!(rc.contains("# my bashrc")); // user content preserved
+
+        // idempotent: re-apply with same palette changes nothing
+        assert!(apply(&dir, &bashrc, &pal, &["fzf".into()])
+            .unwrap()
+            .is_empty());
+
+        // disable everything → files gone, bashrc block removed, user content kept
+        apply(&dir, &bashrc, &pal, &[]).unwrap();
+        assert!(!dir.join("fzf.sh").exists());
+        assert!(!dir.join("init.sh").exists());
+        let rc = std::fs::read_to_string(&bashrc).unwrap();
+        assert!(!rc.contains("omarchy-studio:themesync"));
+        assert!(rc.contains("# my bashrc"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn enabled_set_rejects_unknown_and_round_trips() {
+        let tmp = std::env::temp_dir().join(format!("themesync-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let cfg = tmp.join("config.toml");
+
+        let mut e = Enabled::load(&cfg);
+        assert!(e.set("nonsense", true).is_err());
+        assert!(e.set("fzf", true).unwrap());
+        assert!(!e.set("fzf", true).unwrap()); // already on
+        e.save().unwrap();
+
+        let reloaded = Enabled::load(&cfg);
+        assert!(reloaded.is_on("fzf"));
+        assert_eq!(reloaded.list(), vec!["fzf".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}

@@ -31,6 +31,7 @@ pub mod power;
 pub mod swayosd;
 pub mod targets;
 pub mod themes;
+pub mod themesync;
 pub mod toggles;
 pub mod tweaks;
 pub mod update;

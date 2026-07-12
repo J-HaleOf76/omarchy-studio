@@ -46,6 +46,7 @@ fn main() {
         ["monitor", rest @ ..] => monitor(rest),
         ["tweak", rest @ ..] => tweak(rest),
         ["power", rest @ ..] => power(rest),
+        ["themesync", rest @ ..] => themesync(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -1690,6 +1691,117 @@ fn power(args: &[&str]) -> i32 {
     }
 }
 
+// ── theme sync (0.7.2) ────────────────────────────────────────────────────────
+
+/// Regenerate every enabled tool's theme file from the active palette, wiring
+/// them into `~/.bashrc`. Snapshots the touched files so it's undoable. Shared
+/// by `themesync apply`, `enable`/`disable`, and the `theme-set` hook.
+fn regen_themesync(paths: &OmarchyPaths) -> Result<Vec<std::path::PathBuf>, String> {
+    use studio_core::modules::themes::Palette;
+    use studio_core::modules::themesync::{self, Enabled, Pal};
+    let config_toml = studio_core::studio_config_dir().join("config.toml");
+    let dir = studio_core::studio_config_dir().join("themesync");
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let bashrc = home.join(".bashrc");
+
+    let palette = Palette::load(&paths.current_colors())
+        .map_err(|e| format!("no active palette: {}", brief(e)))?;
+    let pal = Pal::from_palette(&palette);
+    let enabled = Enabled::load(&config_toml).list();
+
+    let changed = themesync::apply(&dir, &bashrc, &pal, &enabled).map_err(brief)?;
+    if !changed.is_empty() {
+        if let Ok(store) = history() {
+            let _ = store.record(
+                SnapshotKind::Post,
+                "themesync: regenerated tool palettes",
+                &changed,
+                "themesync",
+                &[],
+            );
+        }
+    }
+    Ok(changed)
+}
+
+fn themesync(args: &[&str]) -> i32 {
+    use studio_core::modules::themesync::{self, Enabled};
+    let Some(paths) = omarchy() else { return 4 };
+    let config_toml = studio_core::studio_config_dir().join("config.toml");
+
+    match args {
+        ["list"] | [] => {
+            let enabled = Enabled::load(&config_toml);
+            println!("theme sync — terminal tools that follow your Omarchy theme");
+            for t in themesync::catalog() {
+                let on = if enabled.is_on(t.id) { "on " } else { "off" };
+                let avail = if t.available() {
+                    ""
+                } else {
+                    "  (not installed)"
+                };
+                println!("  [{on}] {:<10} {}{}", t.id, t.label, avail);
+            }
+            println!();
+            println!("`themesync enable <tool>` then switch themes (or `themesync apply`)");
+            0
+        }
+        ["enable", id] | ["disable", id] => {
+            let on = args[0] == "enable";
+            let mut enabled = Enabled::load(&config_toml);
+            match enabled.set(id, on) {
+                Ok(false) => {
+                    println!("{id} already {}", if on { "on" } else { "off" });
+                    return 0;
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    eprintln!("{}", brief(e));
+                    return 2;
+                }
+            }
+            if let Err(e) = enabled.save() {
+                eprintln!("couldn't write {}: {}", config_toml.display(), brief(e));
+                return 1;
+            }
+            match regen_themesync(&paths) {
+                Ok(_) => {
+                    println!(
+                        "{id} {} — open a new terminal for it to take effect",
+                        if on { "enabled" } else { "disabled" }
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("saved, but regeneration failed: {e}");
+                    1
+                }
+            }
+        }
+        ["apply"] => match regen_themesync(&paths) {
+            Ok(changed) => {
+                if changed.is_empty() {
+                    println!("nothing to do (no tools enabled, or already up to date)");
+                } else {
+                    println!(
+                        "regenerated {} file(s) from the active theme",
+                        changed.len()
+                    );
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        },
+        _ => {
+            eprintln!("usage: themesync list | enable <tool> | disable <tool> | apply");
+            2
+        }
+    }
+}
+
 /// Run a shell command line (used for the previewed root writes; invoked only
 /// after an explicit --yes). sudo prompts happen in the user's terminal.
 fn run_shell(cmd: &str) -> i32 {
@@ -2506,6 +2618,9 @@ fn hook_event(args: &[&str]) -> i32 {
                 };
                 let _ = RealRunner.run(&cmds::restart(component));
             }
+            // Re-tint the opt-in terminal tools (fzf, lazygit, …) from the new
+            // palette. Best-effort: a themesync failure never fails the hook.
+            let _ = regen_themesync(&paths);
             0
         }
         // After omarchy-update: check for drift/clobbers and notify the

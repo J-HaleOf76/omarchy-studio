@@ -61,6 +61,12 @@ impl OmarchyPaths {
         PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
             .join(".local/share/applications")
     }
+
+    /// The active theme's `colors.toml` (`current/theme` symlinks to the live
+    /// theme dir) — the single source of truth for the running palette.
+    pub fn current_colors(&self) -> PathBuf {
+        self.config.join("current/theme/colors.toml")
+    }
 }
 
 /// Capability probe result (spec 02 §5).

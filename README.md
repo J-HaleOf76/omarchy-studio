@@ -60,6 +60,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Monitors** | Detect displays (`hyprctl monitors -j`), identify which panel is which, adjust scale with the effective resolution shown live, disable a display — written to `monitors.conf` as a managed block with a hotplug fallback, snapshot-backed | v0.8 |
 | **Quick tweaks** | One-key reversible toggles (Caps→Escape, inactive-window transparency, screenshot/screencast folders…) — each a self-contained managed block, individually revertible, never touching Omarchy's vendored files | v0.8 |
 | **Snapshots** | Browse every change Studio has ever made as a timeline with a live colored diff pane, and roll the whole tree back to any point — the restore is itself recorded, so it too can be undone. Only possible because the undo store is a real git repo. CLI `snapshot log`/`show <id>`/`restore <id>` | v0.9 |
+| **Theme sync** | Opt-in tools that follow your Omarchy theme — fzf and lazygit re-tint from the active `colors.toml` on every theme switch (via the `theme-set` hook). Studio never rewrites the tool's own config: it generates standalone files wired in through a single `~/.bashrc` managed block. CLI `themesync list`/`enable <tool>`/`apply` | v0.7 |
 | **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
@@ -165,6 +166,12 @@ omarchy-studio snapshot show <id>                # files changed + colored diff
 omarchy-studio snapshot restore <id>             # roll the whole tree back to <id>
 omarchy-studio snapshot restore <id> --files <path>…   # restore only these files
 omarchy-studio snapshot list | undo
+
+# Theme sync (fzf, lazygit follow the active theme)
+omarchy-studio themesync list                    # tools + on/off + installed state
+omarchy-studio themesync enable <tool>           # opt a tool in, regenerate now
+omarchy-studio themesync disable <tool>
+omarchy-studio themesync apply                   # regenerate from the current theme
 
 # Look & Feel
 omarchy-studio looknfeel list | get <key> | set <key> <value>
