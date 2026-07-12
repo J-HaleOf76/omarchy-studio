@@ -87,9 +87,7 @@ impl NotificationsScreen {
             return NotifAction::None;
         }
         match key.code {
-            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
-                self.nudge(1)
-            }
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => self.nudge(1),
             KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
             KeyCode::Enter => self.nudge(1),
             KeyCode::Char('r') => {

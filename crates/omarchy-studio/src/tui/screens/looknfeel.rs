@@ -159,12 +159,8 @@ impl LookFeelScreen {
             // Tab / shift-tab move between the category tabs ([ ] alias them).
             KeyCode::Tab | KeyCode::Char(']') => self.switch_group(1),
             KeyCode::BackTab | KeyCode::Char('[') => self.switch_group(-1),
-            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
-                return self.nudge(1)
-            }
-            KeyCode::Left | KeyCode::Char('-') | KeyCode::Char(' ') => {
-                return self.nudge(-1)
-            }
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => return self.nudge(1),
+            KeyCode::Left | KeyCode::Char('-') | KeyCode::Char(' ') => return self.nudge(-1),
             KeyCode::Enter => return self.nudge(1),
             KeyCode::Char('r') => return self.reset_selected(),
             KeyCode::Char('R') => {

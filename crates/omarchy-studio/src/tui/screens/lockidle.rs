@@ -105,9 +105,7 @@ impl LockIdleScreen {
             return LockIdleAction::None;
         }
         match key.code {
-            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
-                self.nudge(1)
-            }
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => self.nudge(1),
             KeyCode::Left | KeyCode::Char('-') => self.nudge(-1),
             KeyCode::Enter
                 if matches!(self.rows().get(self.selected), Some(RowKind::Avatar))

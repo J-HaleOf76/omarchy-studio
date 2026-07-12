@@ -233,9 +233,7 @@ impl WaybarScreen {
             KeyCode::Up if shift => self.move_within(-1),
             KeyCode::Right | KeyCode::Char('>') => self.move_lane(1),
             KeyCode::Left | KeyCode::Char('<') => self.move_lane(-1),
-            KeyCode::Down if n > 0 => {
-                self.cursor = (self.cursor + 1).min(n - 1)
-            }
+            KeyCode::Down if n > 0 => self.cursor = (self.cursor + 1).min(n - 1),
             KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = n.saturating_sub(1),
@@ -256,9 +254,7 @@ impl WaybarScreen {
         };
         match key.code {
             KeyCode::Esc => self.target_picker = None,
-            KeyCode::Down => {
-                *sel = (*sel + 1).min(self.candidates.len().saturating_sub(1))
-            }
+            KeyCode::Down => *sel = (*sel + 1).min(self.candidates.len().saturating_sub(1)),
             KeyCode::Up => *sel = sel.saturating_sub(1),
             KeyCode::Enter => {
                 let pick = &self.candidates[*sel];

@@ -475,9 +475,7 @@ impl App {
                     match key.code {
                         KeyCode::Up => self.cycle(-1),
                         KeyCode::Down => self.cycle(1),
-                        KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
-                            self.focus = Focus::Panel
-                        }
+                        KeyCode::Enter | KeyCode::Tab | KeyCode::Right => self.focus = Focus::Panel,
                         KeyCode::Char(d @ '1'..='9') => self.jump(d as usize - '1' as usize),
                         KeyCode::Char('0') => self.jump(9),
                         KeyCode::Esc => self.quit = true,
@@ -1841,7 +1839,11 @@ impl App {
         } else {
             self.skin.dim()
         };
-        let hint = if active { " ↑↓ · ⏎ open " } else { " ⏎ open " };
+        let hint = if active {
+            " ↑↓ · ⏎ open "
+        } else {
+            " ⏎ open "
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
