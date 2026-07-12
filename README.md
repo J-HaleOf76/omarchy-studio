@@ -59,6 +59,7 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Apps & services** | Remove bundled apps and web apps safely: a `pacman -Rs --print` **cascade preview** shows every orphaned dependency, enabled systemd units are disabled first, and pacman's refusal to break a dependency is surfaced as a blocker (never forced). Every removal is logged so `apps restore <id>` can reinstall it. No bulk-confirm bypass | v0.8 |
 | **Monitors** | Detect displays (`hyprctl monitors -j`), identify which panel is which, adjust scale with the effective resolution shown live, disable a display — written to `monitors.conf` as a managed block with a hotplug fallback, snapshot-backed | v0.8 |
 | **Quick tweaks** | One-key reversible toggles (Caps→Escape, inactive-window transparency, screenshot/screencast folders…) — each a self-contained managed block, individually revertible, never touching Omarchy's vendored files | v0.8 |
+| **Snapshots** | Browse every change Studio has ever made as a timeline with a live colored diff pane, and roll the whole tree back to any point — the restore is itself recorded, so it too can be undone. Only possible because the undo store is a real git repo. CLI `snapshot log`/`show <id>`/`restore <id>` | v0.9 |
 | **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
 
 Every change is snapshotted to a git-backed history — undo with a single command or key.
@@ -139,7 +140,7 @@ omarchy-studio          # launch the full-screen cockpit
 | <kbd>U</kbd> | install a waiting update & restart |
 | <kbd>/</kbd> | search · <kbd>?</kbd> help · <kbd>q</kbd> quit |
 
-Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. The one not-yet-built screen (the Snapshots browser) shows an honest "arriving in …" placeholder rather than a broken UI.
+Studio themes itself from your active Omarchy theme — panels, highlights, and the wordmark all re-tint with every theme switch. Every rail entry is a real, working screen.
 
 ## CLI reference
 
@@ -159,7 +160,11 @@ omarchy-studio wallpaper list | current | set <n|name|path> | next | add <file> 
 omarchy-studio wallpaper wallhaven search <query> [--color <hex>] [--ratio 16x9] [--top] [--page N] [--download <n>]
 
 # Snapshots / undo
-omarchy-studio snapshot list | undo | restore <id>
+omarchy-studio snapshot log                      # timeline: id, kind, summary, time
+omarchy-studio snapshot show <id>                # files changed + colored diff
+omarchy-studio snapshot restore <id>             # roll the whole tree back to <id>
+omarchy-studio snapshot restore <id> --files <path>…   # restore only these files
+omarchy-studio snapshot list | undo
 
 # Look & Feel
 omarchy-studio looknfeel list | get <key> | set <key> <value>

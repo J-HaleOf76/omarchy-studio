@@ -409,7 +409,7 @@ fn snapshot(args: &[&str]) -> i32 {
         Err(code) => return code,
     };
     match args {
-        ["list"] => {
+        ["list"] | ["log"] => {
             let entries = store.list(30).unwrap_or_default();
             if entries.is_empty() {
                 println!("no snapshots yet — they appear when Studio first changes a file");
@@ -421,6 +421,29 @@ fn snapshot(args: &[&str]) -> i32 {
                     .map(|k| format!("{k:?}").to_lowercase())
                     .unwrap_or_else(|| "?".into());
                 println!("{}  {:<8} {}  ({})", e.id, kind, e.summary, e.timestamp);
+            }
+            0
+        }
+        ["show", id] => {
+            match store.changed_files(id) {
+                Ok(files) => {
+                    if files.is_empty() {
+                        println!("{id} changed no tracked files");
+                    } else {
+                        println!("files changed by {id}:");
+                        for f in files {
+                            println!("  {}", f.display());
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("no such snapshot `{id}`: {}", brief(e));
+                    return 1;
+                }
+            }
+            if let Ok(diff) = store.diff(id) {
+                println!();
+                print!("{diff}");
             }
             0
         }
@@ -440,6 +463,23 @@ fn snapshot(args: &[&str]) -> i32 {
                 }
             }
         }
+        ["restore", id, "--files", files @ ..] if !files.is_empty() => {
+            let paths: Vec<std::path::PathBuf> =
+                files.iter().map(std::path::PathBuf::from).collect();
+            match store.restore_files(id, &paths) {
+                Ok(restored) => {
+                    println!("restored {} file(s) from {id}:", restored.len());
+                    for f in restored {
+                        println!("  {}", f.display());
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("restore failed: {}", brief(e));
+                    1
+                }
+            }
+        }
         ["restore", id] => match store.restore(id) {
             Ok(files) => {
                 println!("restored state as of {id} ({} file(s))", files.len());
@@ -451,7 +491,7 @@ fn snapshot(args: &[&str]) -> i32 {
             }
         },
         _ => {
-            eprintln!("usage: omarchy-studio snapshot list | undo | restore <id>");
+            eprintln!("usage: omarchy-studio snapshot list | log | show <id> | undo | restore <id> [--files <f>…]");
             2
         }
     }

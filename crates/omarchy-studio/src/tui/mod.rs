@@ -2,9 +2,8 @@
 //! help overlay, command palette. Studio themes itself from the active
 //! Omarchy palette. Elm-ish: events → `handle` → optional side effect → redraw.
 //!
-//! v0.1 wires the Themes screen for real; the other rail entries render an
-//! honest "arriving in <milestone>" placeholder so the shell is navigable
-//! end-to-end without pretending features exist.
+//! Every rail entry is now a real screen (Snapshots, the timeline browser, was
+//! the last placeholder to land in 0.9.4).
 
 mod chord;
 mod imagecell;
@@ -23,6 +22,7 @@ mod screens {
     pub mod monitors;
     pub mod notifications;
     pub mod palette_editor;
+    pub mod snapshots;
     pub mod themes;
     pub mod tweaks;
     pub mod wallhaven;
@@ -35,9 +35,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap,
-};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph};
 use ratatui::Frame;
 
 use studio_core::cmd::{CommandRunner, RealRunner};
@@ -57,6 +55,7 @@ use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::monitors::{MonitorsAction, MonitorsScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
+use screens::snapshots::{SnapshotsAction, SnapshotsScreen};
 use screens::themes::{ThemeAction, ThemesScreen};
 use screens::tweaks::{TweaksAction, TweaksScreen};
 use screens::wallhaven::{BrowserAction, Then, WallhavenBrowser};
@@ -122,39 +121,6 @@ impl Screen {
             Screen::Doctor => "Doctor",
         }
     }
-
-    /// Whether the screen has a real UI yet (false ⇒ honest placeholder).
-    fn built(self) -> bool {
-        matches!(
-            self,
-            Screen::Themes
-                | Screen::Wallpapers
-                | Screen::Keybinds
-                | Screen::LookFeel
-                | Screen::Animations
-                | Screen::Waybar
-                | Screen::Notifications
-                | Screen::LockIdle
-                | Screen::Integrations
-                | Screen::Apps
-                | Screen::Monitors
-                | Screen::Tweaks
-                | Screen::Battery
-                | Screen::Doctor
-        )
-    }
-
-    /// Roadmap milestone a not-yet-built screen is coming in (spec honesty).
-    fn arriving(self) -> &'static str {
-        match self {
-            Screen::Keybinds => "v0.2",
-            Screen::LookFeel | Screen::Animations => "v0.3",
-            Screen::Waybar => "v0.4",
-            Screen::Notifications | Screen::LockIdle => "v0.5",
-            Screen::Wallpapers | Screen::Integrations => "v0.6",
-            _ => "soon",
-        }
-    }
 }
 
 struct Toast {
@@ -184,6 +150,7 @@ struct App {
     waybar: WaybarScreen,
     notifications: NotificationsScreen,
     lockidle: LockIdleScreen,
+    snapshots: SnapshotsScreen,
     apps: AppsScreen,
     monitors: MonitorsScreen,
     tweaks: TweaksScreen,
@@ -240,6 +207,7 @@ impl App {
         let mut notifications = NotificationsScreen::load(&paths);
         notifications.set_dnd(Some(studio_core::modules::mako::dnd_active(&RealRunner)));
         let lockidle = LockIdleScreen::load(&paths);
+        let snapshots = SnapshotsScreen::load();
         let apps = AppsScreen::load(&paths);
         let monitors = MonitorsScreen::load(&paths);
         let tweaks = TweaksScreen::load(&paths);
@@ -287,6 +255,7 @@ impl App {
             waybar,
             notifications,
             lockidle,
+            snapshots,
             apps,
             monitors,
             tweaks,
@@ -599,6 +568,10 @@ impl App {
                 LockIdleAction::None => {}
                 LockIdleAction::Save => self.apply_lockidle(),
             },
+            Screen::Snapshots => match self.snapshots.handle(key) {
+                SnapshotsAction::None => {}
+                SnapshotsAction::Restore(id) => self.snapshots_restore(&id),
+            },
             Screen::Wallpapers => match self.wallpapers.handle(key) {
                 WallpaperAction::None => {}
                 WallpaperAction::Set(path) => self.wp_set(&path),
@@ -681,7 +654,50 @@ impl App {
                     });
                 }
             },
-            _ => {}
+        }
+    }
+
+    /// Roll every tracked file back to a snapshot (roadmap 0.9.4). The restore
+    /// is itself recorded, so it too can be undone. Hypr files are reloaded so
+    /// the rollback is live, not just on-disk.
+    fn snapshots_restore(&mut self, id: &str) {
+        let store = match SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("snapshot store: {}", brief(e)),
+                    ok: false,
+                });
+                return;
+            }
+        };
+        match store.restore(id) {
+            Ok(files) => {
+                if files
+                    .iter()
+                    .any(|p| p.starts_with(self.paths.hypr_config()))
+                {
+                    let _ = RealRunner.run(&cmds::hypr_reload());
+                }
+                self.snapshots.reload();
+                self.toast = Some(Toast {
+                    text: format!(
+                        "Restored {} file(s) from {}",
+                        files.len(),
+                        &id[..id.len().min(8)]
+                    ),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("restore failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -1817,10 +1833,8 @@ impl App {
                     self.skin.accent_bold()
                 } else if selected {
                     self.skin.dim()
-                } else if s.built() {
-                    self.skin.body()
                 } else {
-                    self.skin.dim()
+                    self.skin.body()
                 };
                 let row = Line::from(vec![
                     marker,
@@ -1926,6 +1940,7 @@ impl App {
             Screen::Waybar => self.waybar.render(f, area, &self.skin),
             Screen::Notifications => self.notifications.render(f, area, &self.skin),
             Screen::LockIdle => self.lockidle.render(f, area, &self.skin),
+            Screen::Snapshots => self.snapshots.render(f, area, &self.skin),
             Screen::Wallpapers => self
                 .wallpapers
                 .render(f, area, &self.skin, &mut self.images),
@@ -1935,32 +1950,7 @@ impl App {
             Screen::Tweaks => self.tweaks.render(f, area, &self.skin),
             Screen::Battery => self.battery.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
-            other => self.draw_placeholder(f, area, other),
         }
-    }
-
-    fn draw_placeholder(&self, f: &mut Frame, area: Rect, s: Screen) {
-        let text = vec![
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("◌ ", self.skin.dim()),
-                Span::styled(s.label(), self.skin.accent_bold()),
-                Span::styled(
-                    format!("  · arriving in {}", s.arriving()),
-                    self.skin.warn(),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "The engine underneath (config parsing, apply pipeline, snapshots,",
-                self.skin.dim(),
-            )),
-            Line::from(Span::styled(
-                "undo) is already built and tested — this is the UI on top.",
-                self.skin.dim(),
-            )),
-        ];
-        f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
     }
 
     /// Bottom bar: toast when present, else `key label │ key label` hints with
@@ -1994,6 +1984,7 @@ impl App {
                     Screen::Apps => (format!("{} · esc back", self.apps.hint()), true),
                     Screen::Monitors => (format!("{} · esc back", self.monitors.hint()), true),
                     Screen::Tweaks => (format!("{} · esc back", self.tweaks.hint()), true),
+                    Screen::Snapshots => (format!("{} · esc back", self.snapshots.hint()), true),
                     _ => ("esc back".into(), true),
                 },
             }
@@ -2384,10 +2375,9 @@ mod tests {
         // ALL is the canonical rail order; first is Themes, last is Doctor.
         assert_eq!(Screen::ALL[0], Screen::Themes);
         assert_eq!(*Screen::ALL.last().unwrap(), Screen::Doctor);
-        // every screen has a non-empty label and arriving milestone
+        // every screen has a non-empty label
         for s in Screen::ALL {
             assert!(!s.label().is_empty());
-            assert!(!s.arriving().is_empty());
         }
     }
 }

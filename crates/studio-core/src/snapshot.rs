@@ -202,6 +202,53 @@ impl SnapshotStore {
         Ok(restored)
     }
 
+    /// The real file paths a snapshot changed relative to its parent. The
+    /// genesis commit (no parent) reports every file it introduced.
+    pub fn changed_files(&self, id: &str) -> Result<Vec<PathBuf>> {
+        let out = self.git(&["show", "--name-only", "--format=", id])?;
+        Ok(out
+            .stdout
+            .lines()
+            .filter(|l| l.starts_with("files/"))
+            .map(|l| PathBuf::from("/").join(l.trim_start_matches("files/")))
+            .collect())
+    }
+
+    /// The unified diff a snapshot introduced (`git show`), for display. Tree
+    /// paths keep their `files/` prefix — frontends can strip it.
+    pub fn diff(&self, id: &str) -> Result<String> {
+        Ok(self.git(&["show", "--format=", id])?.stdout)
+    }
+
+    /// Restore only `files` from snapshot `id` (each a real path the snapshot
+    /// tracked); paths absent from that snapshot are skipped. The restore is
+    /// itself recorded. Errors if none of the requested files were present.
+    pub fn restore_files(&self, id: &str, files: &[PathBuf]) -> Result<Vec<PathBuf>> {
+        let mut restored = Vec::new();
+        for real in files {
+            let tree = format!("files/{}", real.to_string_lossy().trim_start_matches('/'));
+            let Ok(out) = self.git(&["show", &format!("{id}:{tree}")]) else {
+                continue;
+            };
+            crate::configfs::atomic_write(real, &out.stdout)?;
+            restored.push(real.clone());
+        }
+        if restored.is_empty() {
+            return Err(StudioError::External {
+                cmd: "snapshot restore --files".into(),
+                detail: "none of those files are in that snapshot".into(),
+            });
+        }
+        self.record(
+            SnapshotKind::Restore,
+            &format!("restored {} file(s) from {id}", restored.len()),
+            &restored,
+            "snapshot",
+            &[("Restored-From".into(), id.to_string())],
+        )?;
+        Ok(restored)
+    }
+
     /// Undo the most recent apply: restore the state captured by its Pre
     /// snapshot. One-shot — cleared after use; older points need an explicit
     /// `restore(id)`.
@@ -464,6 +511,81 @@ mod tests {
         let list = s.list(10).unwrap();
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].kind, Some(SnapshotKind::Restore));
+    }
+
+    #[test]
+    fn changed_files_and_diff_reflect_the_commit() {
+        let dir = scratch("changed");
+        let s = store(&dir);
+        let a = dir.join("a.conf");
+        let b = dir.join("b.conf");
+        std::fs::write(&a, "a1\n").unwrap();
+        std::fs::write(&b, "b1\n").unwrap();
+        s.record(
+            SnapshotKind::Genesis,
+            "start",
+            &[a.clone(), b.clone()],
+            "m",
+            &[],
+        )
+        .unwrap();
+        // change only a
+        std::fs::write(&a, "a2\n").unwrap();
+        let post = s
+            .record(
+                SnapshotKind::Post,
+                "edit a",
+                &[a.clone(), b.clone()],
+                "m",
+                &[],
+            )
+            .unwrap();
+
+        let changed = s.changed_files(&post).unwrap();
+        assert_eq!(changed, vec![a.clone()]); // only a changed
+        let diff = s.diff(&post).unwrap();
+        assert!(diff.contains("a2"));
+        assert!(diff.contains("-a1") || diff.contains("a1"));
+    }
+
+    #[test]
+    fn restore_files_is_selective() {
+        let dir = scratch("selective");
+        let s = store(&dir);
+        let a = dir.join("a.conf");
+        let b = dir.join("b.conf");
+        std::fs::write(&a, "a1\n").unwrap();
+        std::fs::write(&b, "b1\n").unwrap();
+        let genesis = s
+            .record(
+                SnapshotKind::Genesis,
+                "start",
+                &[a.clone(), b.clone()],
+                "m",
+                &[],
+            )
+            .unwrap();
+        std::fs::write(&a, "a2\n").unwrap();
+        std::fs::write(&b, "b2\n").unwrap();
+        s.record(
+            SnapshotKind::Post,
+            "change both",
+            &[a.clone(), b.clone()],
+            "m",
+            &[],
+        )
+        .unwrap();
+
+        // restore only a from genesis; b stays at its new value
+        let restored = s.restore_files(&genesis, std::slice::from_ref(&a)).unwrap();
+        assert_eq!(restored, vec![a.clone()]);
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "a1\n");
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "b2\n");
+        // a file not in the snapshot yields an error
+        let missing = dir.join("nope.conf");
+        assert!(s
+            .restore_files(&genesis, std::slice::from_ref(&missing))
+            .is_err());
     }
 
     #[test]

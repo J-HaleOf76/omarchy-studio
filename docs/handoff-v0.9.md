@@ -27,6 +27,7 @@ This document tracks the work completed during the recent session and outlines e
 ## 3. Where to pick up (Next Steps)
 We are now officially ready to tackle the **v0.9** roadmap milestone. 
 
-1. **Review `ROADMAP.md`**: Look at the v0.9 section. 
-2. **Next Feature - Snapshot Timeline (0.9.4)**: The next major item to build is the Snapshot timeline screen, which currently just shows an "arriving in..." placeholder in the TUI.
-3. **Double-check CI**: Ensure the GitHub Actions builds are staying green across platforms as you build.
+1. **Review `ROADMAP.md`**: Look at the v0.9 section.
+2. **DONE — Snapshot Timeline (0.9.4)**: shipped. The Snapshots screen (`crates/omarchy-studio/src/tui/screens/snapshots.rs`) lists the git snapshot history with a live colored diff pane and whole-tree restore; store gained `changed_files`/`diff`/`restore_files`; CLI gained `snapshot log`/`show <id>`/`restore <id> --files`. This was the last placeholder — every rail entry is now a real screen, so the `built()`/`arriving()`/`draw_placeholder` scaffolding was removed.
+3. **Next Feature**: pick up the remaining v0.9 items in order — 0.9.1 community themes browser, 0.9.2 instant theme-from-wallpaper, 0.9.5 keymap cheatsheet, 0.9.6 rice bundle — or 0.7.2 TUI theme sync per the build order in `docs/handoff-v0.8.md` §7.
+4. **Double-check CI**: Ensure the GitHub Actions builds are staying green across platforms as you build.
