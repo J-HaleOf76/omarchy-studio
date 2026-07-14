@@ -248,16 +248,13 @@ impl WaybarConfig {
         crate::configfs::atomic_write(&self.path, &self.doc.to_string())
     }
 
-    /// Save and restart Waybar so the change shows. Caller snapshots first.
+    /// Save and reload Waybar so the change shows. Caller snapshots first.
+    /// Reloads an already-running Waybar only — if Waybar isn't the user's
+    /// active bar (they run a Quickshell shell or similar) the edit is saved but
+    /// no Waybar is spawned on top of it.
     pub fn apply(&self, runner: &dyn crate::cmd::CommandRunner) -> Result<()> {
         self.save()?;
-        let out = runner.run(&crate::omarchy::cmds::restart(Component::Waybar))?;
-        if !out.ok() {
-            return Err(StudioError::External {
-                cmd: "omarchy-restart-waybar".into(),
-                detail: out.stderr.trim().to_string(),
-            });
-        }
+        crate::omarchy::restart_if_running(runner, Component::Waybar)?;
         Ok(())
     }
 
@@ -276,9 +273,19 @@ impl WaybarConfig {
     ) -> Result<ApplyOutcome> {
         let was_alive = waybar_alive(runner);
         let original = std::fs::read_to_string(&self.path).ok();
-        self.apply(runner)?;
+        self.save()?;
+        // Never spawn a bar the user isn't running: if Waybar wasn't up (e.g.
+        // they run a Quickshell shell), the edit is saved and we stand down —
+        // no restart, so nothing lands on top of their real bar.
         if !was_alive {
             return Ok(ApplyOutcome::AppliedUnwatched);
+        }
+        let out = runner.run(&crate::omarchy::cmds::restart(Component::Waybar))?;
+        if !out.ok() {
+            return Err(StudioError::External {
+                cmd: "omarchy-restart-waybar".into(),
+                detail: out.stderr.trim().to_string(),
+            });
         }
         if !settle.is_zero() {
             std::thread::sleep(settle);
@@ -455,13 +462,9 @@ impl WaybarStyle {
         runner: &dyn crate::cmd::CommandRunner,
     ) -> Result<PathBuf> {
         let path = self.save(paths)?;
-        let out = runner.run(&crate::omarchy::cmds::restart(Component::Waybar))?;
-        if !out.ok() {
-            return Err(StudioError::External {
-                cmd: "omarchy-restart-waybar".into(),
-                detail: out.stderr.trim().to_string(),
-            });
-        }
+        // Reload a running Waybar only — never spawn one on top of a user's
+        // alternative bar (see `WaybarConfig::apply`).
+        crate::omarchy::restart_if_running(runner, Component::Waybar)?;
         Ok(path)
     }
 }

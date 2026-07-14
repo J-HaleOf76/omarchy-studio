@@ -192,6 +192,33 @@ impl Component {
     }
 }
 
+/// Restart `c` to load a config change, but never *spawn* a component the user
+/// isn't running. `omarchy-restart-*` primitives kill-and-relaunch, so calling
+/// one for a component that's absent would start it fresh — e.g. launching
+/// Waybar on top of a user's alternative bar (a Quickshell shell). For any
+/// component with a known process name we first check it's alive and skip the
+/// restart otherwise; components without one (pure reload primitives) always
+/// run. Returns whether a restart was actually issued.
+pub fn restart_if_running(runner: &dyn CommandRunner, c: Component) -> crate::error::Result<bool> {
+    if let Some(proc) = c.process_name() {
+        let alive = runner
+            .run(&cmds::process_alive(proc))
+            .map(|o| o.ok())
+            .unwrap_or(false);
+        if !alive {
+            return Ok(false);
+        }
+    }
+    let out = runner.run(&cmds::restart(c))?;
+    if !out.ok() {
+        return Err(crate::error::StudioError::External {
+            cmd: c.restart_bin().into(),
+            detail: out.stderr.trim().to_string(),
+        });
+    }
+    Ok(true)
+}
+
 /// Typed constructors for the reload primitives (spec 02 §2). Keeping the
 /// command names here — not in `engine` — preserves the "only this module
 /// knows Omarchy commands" rule.
@@ -441,5 +468,39 @@ mod tests {
         std::fs::create_dir_all(paths.config.join("current")).unwrap();
         std::fs::write(paths.config.join("current/theme.name"), "osaka-jade\n").unwrap();
         assert_eq!(paths.current_theme_name().unwrap(), "osaka-jade");
+    }
+
+    #[test]
+    fn restart_if_running_never_spawns_an_absent_bar() {
+        use crate::cmd::CmdOutput;
+        let alive = cmds::process_alive("waybar").display();
+        let restart = cmds::restart(Component::Waybar).display();
+
+        // Waybar not running (a Quickshell user): no restart is issued, so
+        // nothing is spawned on top of their real bar.
+        let runner = StubRunner::default().with(
+            &alive,
+            CmdOutput {
+                status: 1,
+                ..Default::default()
+            },
+        );
+        assert!(!restart_if_running(&runner, Component::Waybar).unwrap());
+        assert!(
+            !runner.calls().contains(&restart),
+            "must not restart/spawn Waybar when it isn't running"
+        );
+
+        // Waybar running: the reload goes through.
+        let runner = StubRunner::default()
+            .with(&alive, CmdOutput::default())
+            .with(&restart, CmdOutput::default());
+        assert!(restart_if_running(&runner, Component::Waybar).unwrap());
+        assert!(runner.calls().contains(&restart));
+
+        // A pure reload primitive (no process to check) always runs.
+        let walker = cmds::restart(Component::Walker).display();
+        let runner = StubRunner::default().with(&walker, CmdOutput::default());
+        assert!(restart_if_running(&runner, Component::Walker).unwrap());
     }
 }

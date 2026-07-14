@@ -2616,7 +2616,10 @@ fn hook_event(args: &[&str]) -> i32 {
                 } else {
                     studio_core::omarchy::Component::Swayosd
                 };
-                let _ = RealRunner.run(&cmds::restart(component));
+                // Reload only if the component is actually running — a theme
+                // change must never spawn Waybar on a machine using a different
+                // bar (e.g. a Quickshell shell).
+                let _ = studio_core::omarchy::restart_if_running(&RealRunner, component);
             }
             // Re-tint the opt-in terminal tools (fzf, lazygit, …) from the new
             // palette. Best-effort: a themesync failure never fails the hook.
