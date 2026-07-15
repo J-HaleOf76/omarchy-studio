@@ -36,6 +36,7 @@ fn main() {
         ["waybar", rest @ ..] => waybar(rest),
         ["notif", rest @ ..] => notif(rest),
         ["osd", rest @ ..] => osd(rest),
+        ["nova", rest @ ..] => nova(rest),
         ["idle", rest @ ..] => idle(rest),
         ["lock", rest @ ..] => lock(rest),
         ["wallpaper", rest @ ..] => wallpaper(rest),
@@ -1182,6 +1183,275 @@ fn osd(args: &[&str]) -> i32 {
         }
         Err(e) => {
             eprintln!("apply failed: {e:?}");
+            1
+        }
+    }
+}
+
+// ── nova ────────────────────────────────────────────────────────────────────
+
+fn nova(args: &[&str]) -> i32 {
+    use studio_core::modules::keybinds::{self, render_chord};
+    use studio_core::modules::nova::{self as nova_mod, Nova, KNOWN_PROVIDERS, MODES};
+    let Some(paths) = omarchy() else { return 4 };
+
+    // Verbs that don't touch nova.json.
+    match args {
+        ["launch"] => {
+            let Some(exec) = nova_mod::launch_command(&paths) else {
+                eprintln!("no Nova checkout found at ~/Projects/nova");
+                return 1;
+            };
+            let cmd = studio_core::cmd::Cmd::new("sh")
+                .arg("-c")
+                .arg(format!("setsid {exec} >/dev/null 2>&1 &"));
+            return match RealRunner.run(&cmd) {
+                Ok(out) if out.ok() => {
+                    println!("launched Nova");
+                    0
+                }
+                _ => {
+                    eprintln!("failed to launch `{exec}`");
+                    1
+                }
+            };
+        }
+        ["keybind"] | ["keybind", "show"] => {
+            match nova_mod::keybind(&paths) {
+                Some(b) => println!("{} → {}", render_chord(b.modmask, &b.key), b.arg),
+                None => println!("no Nova keybind installed"),
+            }
+            return 0;
+        }
+        ["keybind", rest @ ("install" | "remove"), chord @ ..] => {
+            let files = [keybinds::user_bindings_path(&paths)];
+            let store = history().ok();
+            let action = if *rest == "remove" {
+                if !chord.is_empty() {
+                    eprintln!("usage: nova keybind remove");
+                    return 2;
+                }
+                if let Some(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Pre,
+                        "before nova keybind remove",
+                        &files,
+                        "nova",
+                        &[],
+                    );
+                }
+                match nova_mod::remove_keybind(&paths, &RealRunner) {
+                    Ok(true) => "nova keybind removed".to_string(),
+                    Ok(false) => {
+                        println!("no Nova keybind installed");
+                        return 0;
+                    }
+                    Err(e) => {
+                        eprintln!("remove failed: {e:?}");
+                        return 1;
+                    }
+                }
+            } else {
+                let (mods, key) = match chord {
+                    [] => ("SUPER", "SPACE"),
+                    [m, k] => (*m, *k),
+                    _ => {
+                        eprintln!(
+                            "usage: nova keybind install [MODS KEY]   (e.g. \"SUPER SHIFT\" N)"
+                        );
+                        return 2;
+                    }
+                };
+                let Some(exec) = nova_mod::launch_command(&paths) else {
+                    eprintln!("no Nova checkout found at ~/Projects/nova");
+                    return 1;
+                };
+                if let Some(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Pre,
+                        "before nova keybind install",
+                        &files,
+                        "nova",
+                        &[],
+                    );
+                }
+                match nova_mod::install_keybind(&paths, mods, key, &exec, &RealRunner) {
+                    Ok(b) => format!("{} launches Nova", render_chord(b.modmask, &b.key)),
+                    Err(e) => {
+                        eprintln!("install failed: {e:?}");
+                        return 1;
+                    }
+                }
+            };
+            if let Some(s) = &store {
+                let _ = s.record(SnapshotKind::Post, &action, &files, "nova", &[]);
+            }
+            println!("{action} · undo with `omarchy-studio snapshot undo`");
+            return 0;
+        }
+        _ => {}
+    }
+
+    let mut nv = Nova::load(&paths);
+    let summary = match args {
+        ["show"] | ["list"] | [] => {
+            println!("mode              {}", nv.cfg.mode);
+            println!("providers         {}", nv.cfg.providers.join(", "));
+            println!("limit             {}", nv.cfg.limit);
+            println!("backdrop-opacity  {}", nv.cfg.backdrop_opacity);
+            println!("blur              {}", nv.cfg.blur);
+            println!("accent-glow       {}", nv.cfg.accent_glow);
+            println!("theme             {}", nv.cfg.theme);
+            println!(
+                "anim stagger      {} ({}ms)",
+                nv.cfg.anim.stagger, nv.cfg.anim.stagger_ms
+            );
+            println!("anim living-bg    {}", nv.cfg.anim.living_background);
+            println!("anim spring       {}", nv.cfg.anim.spring);
+            println!("anim micro        {}", nv.cfg.anim.micro);
+            match nova_mod::keybind(&paths) {
+                Some(b) => println!("keybind           {}", render_chord(b.modmask, &b.key)),
+                None => println!("keybind           none"),
+            }
+            match nova_mod::launch_command(&paths) {
+                Some(cmd) => println!("launch            {cmd}"),
+                None => println!("launch            (no checkout at ~/Projects/nova)"),
+            }
+            return 0;
+        }
+        ["mode", m] => {
+            if !MODES.contains(m) {
+                eprintln!("mode is one of: {}", MODES.join(", "));
+                return 2;
+            }
+            nv.cfg.mode = m.to_string();
+            format!("nova mode={m}")
+        }
+        ["set", "blur", v] => match parse_bool(v) {
+            Some(b) => {
+                nv.cfg.blur = b;
+                format!("nova blur={b}")
+            }
+            None => {
+                eprintln!("blur is on or off");
+                return 2;
+            }
+        },
+        ["set", "glow", v] => match parse_bool(v) {
+            Some(b) => {
+                nv.cfg.accent_glow = b;
+                format!("nova glow={b}")
+            }
+            None => {
+                eprintln!("glow is on or off");
+                return 2;
+            }
+        },
+        ["set", "opacity", v] => match v.parse::<f64>() {
+            Ok(o) if (0.5..=1.0).contains(&o) => {
+                nv.cfg.backdrop_opacity = o;
+                format!("nova opacity={o}")
+            }
+            _ => {
+                eprintln!("opacity must be between 0.5 and 1.0");
+                return 2;
+            }
+        },
+        ["set", "limit", v] => match v.parse::<i64>() {
+            Ok(n) if (10..=100).contains(&n) => {
+                nv.cfg.limit = n;
+                format!("nova limit={n}")
+            }
+            _ => {
+                eprintln!("limit must be 10–100");
+                return 2;
+            }
+        },
+        ["anim", "stagger-ms", v] => match v.parse::<i64>() {
+            Ok(n) if (0..=120).contains(&n) => {
+                nv.cfg.anim.stagger_ms = n;
+                format!("nova anim stagger-ms={n}")
+            }
+            _ => {
+                eprintln!("stagger-ms must be 0–120");
+                return 2;
+            }
+        },
+        ["anim", knob @ ("stagger" | "living" | "spring" | "micro"), v] => match parse_bool(v) {
+            Some(b) => {
+                match *knob {
+                    "stagger" => nv.cfg.anim.stagger = b,
+                    "living" => nv.cfg.anim.living_background = b,
+                    "spring" => nv.cfg.anim.spring = b,
+                    _ => nv.cfg.anim.micro = b,
+                }
+                format!("nova anim {knob}={b}")
+            }
+            None => {
+                eprintln!("anim {knob} is on or off");
+                return 2;
+            }
+        },
+        ["providers"] => {
+            for p in KNOWN_PROVIDERS {
+                let on = nv.cfg.providers.iter().any(|q| q == p);
+                println!("{} {p}", if on { "●" } else { "○" });
+            }
+            return 0;
+        }
+        ["providers", "add", p] => {
+            if !KNOWN_PROVIDERS.contains(p) {
+                eprintln!("unknown provider `{p}` — see `nova providers`");
+                return 2;
+            }
+            if nv.cfg.providers.iter().any(|q| q == p) {
+                println!("{p} already enabled");
+                return 0;
+            }
+            nv.cfg.providers.push(p.to_string());
+            format!("nova providers += {p}")
+        }
+        ["providers", "remove", p] => {
+            let before = nv.cfg.providers.len();
+            nv.cfg.providers.retain(|q| q != p);
+            if nv.cfg.providers.len() == before {
+                println!("{p} wasn't enabled");
+                return 0;
+            }
+            format!("nova providers -= {p}")
+        }
+        _ => {
+            eprintln!(
+                "usage: nova show | mode <{}> | set blur|glow <on|off> | set opacity <0.5..1> | set limit <n> \
+                 | anim stagger|living|spring|micro <on|off> | anim stagger-ms <n> \
+                 | providers [add|remove <name>] | keybind [install [MODS KEY]|remove|show] | launch",
+                MODES.join("|")
+            );
+            return 2;
+        }
+    };
+
+    let files = [nv.config_path().to_path_buf()];
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before {summary}"),
+            &files,
+            "nova",
+            &[],
+        );
+    }
+    match nv.save() {
+        Ok(()) => {
+            if let Some(s) = &store {
+                let _ = s.record(SnapshotKind::Post, &summary, &files, "nova", &[]);
+            }
+            println!("{summary} · takes effect on Nova's next launch");
+            0
+        }
+        Err(e) => {
+            eprintln!("save failed: {e:?}");
             1
         }
     }

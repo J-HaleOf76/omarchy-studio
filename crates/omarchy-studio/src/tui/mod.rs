@@ -21,6 +21,7 @@ mod screens {
     pub mod looknfeel;
     pub mod monitors;
     pub mod notifications;
+    pub mod nova;
     pub mod palette_editor;
     pub mod snapshots;
     pub mod themes;
@@ -54,6 +55,7 @@ use screens::lockidle::{LockIdleAction, LockIdleScreen};
 use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::monitors::{MonitorsAction, MonitorsScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
+use screens::nova::{NovaAction, NovaScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::snapshots::{SnapshotsAction, SnapshotsScreen};
 use screens::themes::{ThemeAction, ThemesScreen};
@@ -80,11 +82,12 @@ enum Screen {
     Monitors,
     Tweaks,
     Battery,
+    Nova,
     Doctor,
 }
 
 impl Screen {
-    const ALL: [Screen; 15] = [
+    const ALL: [Screen; 16] = [
         Screen::Themes,
         Screen::Wallpapers,
         Screen::Keybinds,
@@ -99,6 +102,7 @@ impl Screen {
         Screen::Monitors,
         Screen::Tweaks,
         Screen::Battery,
+        Screen::Nova,
         Screen::Doctor,
     ];
 
@@ -118,6 +122,7 @@ impl Screen {
             Screen::Monitors => "Monitors",
             Screen::Tweaks => "Tweaks",
             Screen::Battery => "Power",
+            Screen::Nova => "Nova",
             Screen::Doctor => "Doctor",
         }
     }
@@ -155,6 +160,7 @@ struct App {
     monitors: MonitorsScreen,
     tweaks: TweaksScreen,
     battery: BatteryScreen,
+    nova: NovaScreen,
     doctor: DoctorScreen,
     integrations: IntegrationsScreen,
     wallpapers: WallpapersScreen,
@@ -212,6 +218,7 @@ impl App {
         let monitors = MonitorsScreen::load(&paths);
         let tweaks = TweaksScreen::load(&paths);
         let battery = BatteryScreen::load();
+        let nova = NovaScreen::load(&paths);
         let integrations = IntegrationsScreen::load(&RealRunner);
         let mut doctor = DoctorScreen::load(&paths, &RealRunner);
         doctor.set_graphics(images.protocol_label());
@@ -260,6 +267,7 @@ impl App {
             monitors,
             tweaks,
             battery,
+            nova,
             doctor,
             integrations,
             wallpapers,
@@ -642,6 +650,30 @@ impl App {
                     });
                 }
             },
+            Screen::Nova => match self.nova.handle(key) {
+                NovaAction::None => {}
+                NovaAction::Apply => self.nova_apply(),
+                NovaAction::ToggleBind => self.nova_toggle_bind(),
+                NovaAction::Launch => {
+                    let exec = self.nova.launch_exec().map(str::to_string);
+                    match exec {
+                        Some(e) => self.launch_tool(&e, "Nova", false),
+                        None => {
+                            self.toast = Some(Toast {
+                                text: "no Nova checkout found at ~/Projects/nova".into(),
+                                ok: false,
+                            });
+                        }
+                    }
+                }
+                NovaAction::Refresh => {
+                    self.nova.reload(&self.paths);
+                    self.toast = Some(Toast {
+                        text: "Re-read Nova config".into(),
+                        ok: true,
+                    });
+                }
+            },
             Screen::Doctor => match self.doctor.handle(key) {
                 DoctorAction::None => {}
                 DoctorAction::InstallHooks => self.install_hooks(),
@@ -654,6 +686,106 @@ impl App {
                     });
                 }
             },
+        }
+    }
+
+    /// Snapshot + save nova.json. Nova reads it at launch — nothing to restart.
+    fn nova_apply(&mut self) {
+        let files = [self.nova.model().config_path().to_path_buf()];
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        )
+        .ok();
+        if let Some(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before nova config save",
+                &files,
+                "nova",
+                &[],
+            );
+        }
+        match self.nova.model().save() {
+            Ok(()) => {
+                if let Some(s) = &store {
+                    let _ = s.record(SnapshotKind::Post, "nova config save", &files, "nova", &[]);
+                }
+                self.nova.saved();
+                self.toast = Some(Toast {
+                    text: "Nova config saved — applies on next launch".into(),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("save failed: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Install the Nova launch bind (SUPER+SPACE) if absent, remove it if
+    /// present — through the shared keybinds override block, snapshot-backed.
+    fn nova_toggle_bind(&mut self) {
+        use studio_core::modules::keybinds;
+        use studio_core::modules::nova as nova_mod;
+        let files = [keybinds::user_bindings_path(&self.paths)];
+        let store = SnapshotStore::open_or_init(
+            studio_core::studio_state_dir().join("history"),
+            Box::new(RealRunner),
+        )
+        .ok();
+        if let Some(s) = &store {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before nova keybind change",
+                &files,
+                "nova",
+                &[],
+            );
+        }
+        let result = if nova_mod::keybind(&self.paths).is_some() {
+            nova_mod::remove_keybind(&self.paths, &RealRunner)
+                .map(|_| "Nova keybind removed".to_string())
+        } else {
+            match nova_mod::launch_command(&self.paths) {
+                Some(exec) => {
+                    nova_mod::install_keybind(&self.paths, "SUPER", "SPACE", &exec, &RealRunner)
+                        .map(|b| {
+                            format!(
+                                "{} launches Nova",
+                                keybinds::render_chord(b.modmask, &b.key)
+                            )
+                        })
+                }
+                None => Err(studio_core::error::StudioError::External {
+                    cmd: "nova".into(),
+                    detail: "no Nova checkout found at ~/Projects/nova".into(),
+                }),
+            }
+        };
+        match result {
+            Ok(text) => {
+                if let Some(s) = &store {
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        "nova keybind change",
+                        &files,
+                        "nova",
+                        &[],
+                    );
+                }
+                self.nova.reload(&self.paths);
+                self.toast = Some(Toast { text, ok: true });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("keybind: {}", brief(e)),
+                    ok: false,
+                });
+            }
         }
     }
 
@@ -1949,6 +2081,7 @@ impl App {
             Screen::Monitors => self.monitors.render(f, area, &self.skin),
             Screen::Tweaks => self.tweaks.render(f, area, &self.skin),
             Screen::Battery => self.battery.render(f, area, &self.skin),
+            Screen::Nova => self.nova.render(f, area, &self.skin),
             Screen::Doctor => self.doctor.render(f, area, &self.skin),
         }
     }
@@ -1984,6 +2117,7 @@ impl App {
                     Screen::Apps => (format!("{} · esc back", self.apps.hint()), true),
                     Screen::Monitors => (format!("{} · esc back", self.monitors.hint()), true),
                     Screen::Tweaks => (format!("{} · esc back", self.tweaks.hint()), true),
+                    Screen::Nova => (format!("{} · esc back", self.nova.hint()), true),
                     Screen::Snapshots => (format!("{} · esc back", self.snapshots.hint()), true),
                     _ => ("esc back".into(), true),
                 },
