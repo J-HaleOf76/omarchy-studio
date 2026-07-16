@@ -1,13 +1,23 @@
 #!/bin/sh
 set -e
 
-# omarchy-studio quick installer (v1.0)
-# Fetches the latest release binary from GitHub and installs it to ~/.local/bin
+# omarchy-studio quick installer
+# Fetches the latest release binary from GitHub and installs it over the
+# omarchy-studio already on PATH (so updates land where your shell actually
+# looks), or to ~/.local/bin on a fresh machine.
 
 REPO="arino08/omarchy-studio"
 BIN_NAME="omarchy-studio"
 ASSET_NAME="omarchy-studio-linux-x86_64"
-INSTALL_DIR="$HOME/.local/bin"
+
+# Install over the existing binary if one is on PATH — installing to a
+# second location just gets shadowed and looks like the update "didn't take".
+EXISTING=$(command -v "$BIN_NAME" 2>/dev/null || true)
+if [ -n "$EXISTING" ]; then
+    INSTALL_DIR=$(dirname "$EXISTING")
+else
+    INSTALL_DIR="$HOME/.local/bin"
+fi
 
 echo "=> Fetching latest release of $BIN_NAME..."
 
@@ -17,9 +27,21 @@ LATEST_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep
 if [ -n "$LATEST_URL" ]; then
     echo "=> Downloading pre-built binary from $LATEST_URL..."
     mkdir -p "$INSTALL_DIR"
-    curl -sL "$LATEST_URL" -o "$INSTALL_DIR/$BIN_NAME"
-    chmod +x "$INSTALL_DIR/$BIN_NAME"
-    echo "=> Success! $BIN_NAME installed/updated to $INSTALL_DIR/$BIN_NAME"
+    TMP=$(mktemp "${TMPDIR:-/tmp}/$BIN_NAME.XXXXXX")
+    trap 'rm -f "$TMP"' EXIT
+    curl -fsSL "$LATEST_URL" -o "$TMP"
+    # Never install something that isn't the binary (a rate-limited API
+    # response or an error page must not end up on PATH).
+    if [ "$(head -c 4 "$TMP")" != "$(printf '\177ELF')" ] || [ "$(wc -c <"$TMP")" -lt 1048576 ]; then
+        echo "Error: download was not the release binary (rate-limited or network trouble?)." >&2
+        echo "Try again in a minute, or download it yourself from:" >&2
+        echo "  $LATEST_URL" >&2
+        exit 1
+    fi
+    chmod +x "$TMP"
+    mv "$TMP" "$INSTALL_DIR/$BIN_NAME"
+    trap - EXIT
+    echo "=> Success! Installed $("$INSTALL_DIR/$BIN_NAME" --version) to $INSTALL_DIR/$BIN_NAME"
 else
     echo "=> No pre-built binary found for the latest release."
     if command -v cargo >/dev/null 2>&1; then
@@ -40,6 +62,15 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     echo "Note: $INSTALL_DIR is not in your PATH."
     echo "Add the following line to your ~/.bashrc or ~/.zshrc:"
     echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
+fi
+
+# A different copy earlier in PATH would shadow what we just installed.
+RESOLVED=$(command -v "$BIN_NAME" 2>/dev/null || true)
+if [ -n "$RESOLVED" ] && [ "$RESOLVED" != "$INSTALL_DIR/$BIN_NAME" ]; then
+    echo ""
+    echo "Warning: your shell resolves $BIN_NAME to $RESOLVED,"
+    echo "which shadows the copy just installed. Remove or update that one:"
+    echo "  rm \"$RESOLVED\"   # then re-run your shell"
 fi
 
 echo ""
