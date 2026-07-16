@@ -57,11 +57,11 @@ pub fn find(id: &str) -> Option<Tool> {
 /// A small palette view with graceful fallbacks — every getter resolves to a
 /// concrete hex so a theme missing an optional key still yields valid output.
 pub struct Pal {
-    bg: String,
-    fg: String,
-    accent: String,
-    sel_bg: String,
-    ansi: [String; 16],
+    pub bg: String,
+    pub fg: String,
+    pub accent: String,
+    pub sel_bg: String,
+    pub ansi: [String; 16],
 }
 
 impl Pal {
