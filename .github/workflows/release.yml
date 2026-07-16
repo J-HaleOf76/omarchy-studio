@@ -28,6 +28,18 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      # The binary reports CARGO_PKG_VERSION (TUI header, --version, and the
+      # self-updater's CURRENT). A tag that doesn't match Cargo.toml ships a
+      # binary that lies about itself and self-updates forever — refuse it.
+      - name: Check tag matches crate version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          crate="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$tag" != "$crate" ]; then
+            echo "tag $tag != workspace version $crate — bump Cargo.toml first" >&2
+            exit 1
+          fi
+
       - name: Install Rust (pinned, matches CI)
         uses: dtolnay/rust-toolchain@1.96.1
 
