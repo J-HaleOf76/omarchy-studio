@@ -392,11 +392,82 @@ fn theme(args: &[&str]) -> i32 {
                 }
             }
         }
+        ["community", rest @ ..] => {
+            use studio_core::modules::community::{catalog, matches};
+            let installed: std::collections::HashSet<String> =
+                store.list().into_iter().map(|t| t.slug).collect();
+            let print = |themes: &[&studio_core::modules::community::CommunityTheme]| {
+                for t in themes {
+                    let marker = if installed.contains(&t.install_slug()) {
+                        "*"
+                    } else {
+                        " "
+                    };
+                    println!("{marker} {:<28} github.com/{}", t.name, t.repo);
+                }
+            };
+            let all = catalog();
+            match rest {
+                ["list"] => {
+                    print(&all.iter().collect::<Vec<_>>());
+                    0
+                }
+                ["search", q] => {
+                    let hits: Vec<_> = all.iter().filter(|t| matches(t, q)).collect();
+                    if hits.is_empty() {
+                        eprintln!("nothing in the directory matches `{q}`");
+                        return 1;
+                    }
+                    print(&hits);
+                    0
+                }
+                ["install", what] => {
+                    // Accept a directory name, an owner/repo, or a git URL.
+                    let url = if what.contains("://") || what.ends_with(".git") {
+                        what.to_string()
+                    } else if let Some(hit) = all.iter().find(|t| {
+                        t.name.eq_ignore_ascii_case(what)
+                            || t.repo.eq_ignore_ascii_case(what)
+                            || t.install_slug() == what.to_lowercase()
+                    }) {
+                        hit.clone_url()
+                    } else {
+                        eprintln!(
+                            "`{what}` is not in the directory — pass a git URL, or see \
+                             `theme community list`"
+                        );
+                        return 1;
+                    };
+                    println!("installing from {url} — this clones the repo and applies the theme");
+                    match RealRunner.run(&cmds::theme_install(&url)) {
+                        Ok(o) if o.ok() => {
+                            println!("installed and applied.");
+                            0
+                        }
+                        Ok(o) => {
+                            eprintln!("omarchy-theme-install failed: {}", o.stderr.trim());
+                            1
+                        }
+                        Err(e) => {
+                            eprintln!("could not run omarchy-theme-install: {e:?}");
+                            1
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!(
+                        "usage: omarchy-studio theme community list | search <q> | install <name|owner/repo|url>"
+                    );
+                    2
+                }
+            }
+        }
         _ => {
             eprintln!(
                 "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new> \
                  | new <name> --from-image <path> [--mode normal|muted|material] [--bias auto|dark|light] [--apply] \
-                 | extract <image> [normal|muted|material] [auto|dark|light]"
+                 | extract <image> [normal|muted|material] [auto|dark|light] \
+                 | community list|search|install"
             );
             2
         }

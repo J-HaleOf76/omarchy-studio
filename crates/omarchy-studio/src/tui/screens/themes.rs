@@ -53,6 +53,8 @@ pub enum ThemeAction {
     },
     /// Open the palette editor for `slug`.
     Edit(String),
+    /// Open the community themes browser.
+    Community,
 }
 
 pub struct ThemesScreen {
@@ -143,6 +145,7 @@ impl ThemesScreen {
                     return ThemeAction::Edit(slug);
                 }
             }
+            Char('c') => return ThemeAction::Community,
             _ => {}
         }
         ThemeAction::None
@@ -162,7 +165,7 @@ impl ThemesScreen {
         if self.fork_input.is_some() {
             "type a name for the new theme · enter save · esc cancel".into()
         } else {
-            "↑↓ move · enter apply · e edit colours · f fork".into()
+            "↑↓ move · enter apply · e edit colours · f fork · c community".into()
         }
     }
 

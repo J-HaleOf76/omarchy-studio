@@ -20,6 +20,7 @@ pub mod animations;
 pub mod apps;
 pub mod battery;
 pub mod color;
+pub mod community;
 pub mod dispatchers;
 pub mod extraction;
 pub mod keybinds;

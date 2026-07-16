@@ -286,6 +286,15 @@ pub mod cmds {
         Cmd::new("omarchy-theme-set").arg(slug)
     }
 
+    /// Clone a theme repo into the user themes dir **and apply it** —
+    /// `omarchy-theme-install` does both. The generous timeout covers the
+    /// git clone plus the full theme-set pipeline it runs at the end.
+    pub fn theme_install(url: &str) -> Cmd {
+        Cmd::new("omarchy-theme-install")
+            .arg(url)
+            .timeout(std::time::Duration::from_secs(120))
+    }
+
     /// Re-apply current theme without touching the wallpaper (env guard).
     pub fn theme_set_keep_bg(slug: &str) -> Cmd {
         Cmd::new("omarchy-theme-set")

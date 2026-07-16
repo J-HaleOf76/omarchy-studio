@@ -14,6 +14,7 @@ mod screens {
     pub mod animations;
     pub mod apps;
     pub mod battery;
+    pub mod community;
     pub mod doctor;
     pub mod integrations;
     pub mod keybinds;
@@ -48,6 +49,7 @@ use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 use screens::animations::{AnimAction, AnimationsScreen};
 use screens::apps::{AppsAction, AppsScreen};
 use screens::battery::{BatteryAction, BatteryScreen};
+use screens::community::{CommunityAction, CommunityBrowser};
 use screens::doctor::{DoctorAction, DoctorScreen};
 use screens::integrations::{IntegrationsAction, IntegrationsScreen};
 use screens::keybinds::{KeybindAction, KeybindsScreen};
@@ -170,6 +172,8 @@ struct App {
     wizard: Option<WizardScreen>,
     /// wallhaven browser, when open (modal; wizard can stack on top via `t`).
     wallhaven: Option<WallhavenBrowser>,
+    /// community themes browser, when open (modal over the Themes screen).
+    community: Option<CommunityBrowser>,
     /// Active palette editor (modal over the content pane), with the theme
     /// slug that was showing before it opened (restored on cancel).
     editor: Option<(PaletteEditor, String)>,
@@ -274,6 +278,7 @@ impl App {
             images,
             wizard: None,
             wallhaven: None,
+            community: None,
             editor: None,
             palette: None,
             help: false,
@@ -411,6 +416,14 @@ impl App {
             }
             return;
         }
+        // And the community themes browser (filter field + its own chords).
+        if let Some(b) = self.community.as_mut() {
+            match b.handle(key) {
+                CommunityAction::None => {}
+                CommunityAction::Close => self.community = None,
+            }
+            return;
+        }
 
         // Global chords (only when no in-screen text/chord/modal field is active).
         let capturing = (matches!(self.screen, Screen::Themes) && self.themes.is_capturing())
@@ -478,6 +491,7 @@ impl App {
                 ThemeAction::Apply(slug) => self.apply_theme(&slug),
                 ThemeAction::Fork { src, name } => self.fork_theme(&src, &name),
                 ThemeAction::Edit(slug) => self.open_editor(&slug),
+                ThemeAction::Community => self.open_community(),
             },
             Screen::Keybinds => match self.keybinds.handle(key) {
                 KeybindAction::None => {}
@@ -1415,6 +1429,35 @@ impl App {
         }
     }
 
+    /// `c` on the Themes screen: open the community browser, seeded with
+    /// the store's slugs so already-installed entries are marked.
+    fn open_community(&mut self) {
+        let installed = ThemeStore::from_paths(&self.paths)
+            .list()
+            .into_iter()
+            .map(|t| t.slug)
+            .collect();
+        self.community = Some(CommunityBrowser::open(installed));
+    }
+
+    /// Drain the community browser's worker results; a finished install
+    /// reloads Themes (the install script applied the theme too).
+    fn community_poll(&mut self) {
+        let Some(b) = self.community.as_mut() else {
+            return;
+        };
+        let Some(done) = b.drain() else {
+            return;
+        };
+        self.themes.reload(&self.paths);
+        self.themes.focus(&done.slug);
+        self.skin = Skin::from_current(&self.paths);
+        self.toast = Some(Toast {
+            text: format!("{} installed and applied (slug `{}`)", done.name, done.slug),
+            ok: true,
+        });
+    }
+
     /// Enter in the wizard: write the theme dir, land the user on Themes
     /// with the new theme ready to apply or refine in the palette editor.
     fn wizard_create(&mut self) {
@@ -1936,6 +1979,9 @@ impl App {
         if let Some(b) = &self.wallhaven {
             b.render(f, cols[1], &self.skin, &mut self.images);
         }
+        if let Some(b) = &self.community {
+            b.render(f, cols[1], &self.skin);
+        }
         if let Some(w) = &self.wizard {
             w.render(f, cols[1], &self.skin);
         }
@@ -2416,8 +2462,9 @@ pub fn run() -> i32 {
         // While background work is in flight (the launch update-check, or
         // wallhaven requests), poll so results can surface without a
         // keypress; otherwise this is a blocking read (zero idle wakeups).
-        let background_busy =
-            app.update_rx.is_some() || app.wallhaven.as_ref().is_some_and(|b| b.busy());
+        let background_busy = app.update_rx.is_some()
+            || app.wallhaven.as_ref().is_some_and(|b| b.busy())
+            || app.community.as_ref().is_some_and(|b| b.busy());
         if background_busy {
             match event::poll(std::time::Duration::from_millis(250)) {
                 Ok(ready) => {
@@ -2430,6 +2477,7 @@ pub fn run() -> i32 {
                         _ => {}
                     }
                     app.wallhaven_poll();
+                    app.community_poll();
                     if app.quit {
                         break Ok(());
                     }
