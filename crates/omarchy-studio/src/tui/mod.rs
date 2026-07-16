@@ -724,7 +724,13 @@ impl App {
         match self.nova.model().save() {
             Ok(()) => {
                 if let Some(s) = &store {
-                    let _ = s.record(SnapshotKind::Post, "Nice Launcher config save", &files, "nova", &[]);
+                    let _ = s.record(
+                        SnapshotKind::Post,
+                        "Nice Launcher config save",
+                        &files,
+                        "nova",
+                        &[],
+                    );
                 }
                 self.nova.saved();
                 self.toast = Some(Toast {

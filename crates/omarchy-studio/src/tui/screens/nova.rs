@@ -121,7 +121,11 @@ impl NovaScreen {
         } else {
             "b keybind"
         };
-        let install = if nova::is_installed() { "" } else { " · i install" };
+        let install = if nova::is_installed() {
+            ""
+        } else {
+            " · i install"
+        };
         format!("↑↓ row · ←→ adjust · s save · {bind}{install} · l launch · r re-read")
     }
 

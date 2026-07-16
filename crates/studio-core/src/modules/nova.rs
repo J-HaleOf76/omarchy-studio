@@ -211,10 +211,7 @@ pub fn install(runner: &dyn CommandRunner) -> Result<PathBuf> {
     let bin = bin_path();
 
     // Clone into a temp directory.
-    let tmp = std::env::temp_dir().join(format!(
-        "nice-launcher-install-{}",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("nice-launcher-install-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let clone = crate::cmd::Cmd::new("git")
         .arg("clone")

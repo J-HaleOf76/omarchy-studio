@@ -1571,34 +1571,30 @@ fn nova(args: &[&str]) -> i32 {
             println!("{action} · undo with `omarchy-studio snapshot undo`");
             return 0;
         }
-        ["install"] => {
-            match nova_mod::install(&RealRunner) {
-                Ok(path) => {
-                    println!("Installed Nice Launcher to {}", path.display());
-                    return 0;
-                }
-                Err(e) => {
-                    eprintln!("install failed: {e:?}");
-                    return 1;
-                }
+        ["install"] => match nova_mod::install(&RealRunner) {
+            Ok(path) => {
+                println!("Installed Nice Launcher to {}", path.display());
+                return 0;
             }
-        }
-        ["uninstall"] => {
-            match nova_mod::uninstall() {
-                Ok(true) => {
-                    println!("Uninstalled Nice Launcher");
-                    return 0;
-                }
-                Ok(false) => {
-                    println!("Nice Launcher was not installed");
-                    return 0;
-                }
-                Err(e) => {
-                    eprintln!("uninstall failed: {e:?}");
-                    return 1;
-                }
+            Err(e) => {
+                eprintln!("install failed: {e:?}");
+                return 1;
             }
-        }
+        },
+        ["uninstall"] => match nova_mod::uninstall() {
+            Ok(true) => {
+                println!("Uninstalled Nice Launcher");
+                return 0;
+            }
+            Ok(false) => {
+                println!("Nice Launcher was not installed");
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("uninstall failed: {e:?}");
+                return 1;
+            }
+        },
         _ => {}
     }
 
