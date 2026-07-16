@@ -420,7 +420,7 @@ mod tests {
         let bind = install_keybind(&paths, "SUPER", "SPACE", "/x/nova", &runner).unwrap();
         assert_eq!(
             bind.render_line(),
-            "bindd = SUPER, SPACE, Nova launcher, exec, /x/nova"
+            "bindd = SUPER, SPACE, Nice Launcher, exec, /x/nova"
         );
 
         let found = keybind(&paths).expect("bind installed");
