@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "omarchy-studio"
-version = "0.8.7"
+version = "0.8.8"
 dependencies = [
  "image",
  "ratatui",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "studio-core"
-version = "0.8.7"
+version = "0.8.8"
 dependencies = [
  "image",
  "serde",
