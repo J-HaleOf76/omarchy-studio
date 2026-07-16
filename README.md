@@ -19,7 +19,7 @@ o m a r c h y
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (246 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
+> **Status: alpha.** The modules below are built, tested (248 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Contents
 - [Why](#why)
@@ -158,6 +158,8 @@ omarchy-studio theme list | current | apply <name> | fork <src> <new>
 omarchy-studio theme new <name> --from-image <path> [--mode normal|muted|material] [--bias auto|dark|light] [--apply]
 omarchy-studio theme extract <image> [normal|muted|material] [auto|dark|light]
 omarchy-studio theme community list | search <q> | install <name|owner/repo|url>   # install clones + applies
+omarchy-studio theme new [name] --from-current-wallpaper [--apply]   # instant theme from what's on screen
+omarchy-studio theme keybind install [MODS KEY] | remove | show      # opt-in SUPER+SHIFT+T for the above
 
 # Wallpapers
 omarchy-studio wallpaper list | current | set <n|name|path> | next | add <file> | remove <name>

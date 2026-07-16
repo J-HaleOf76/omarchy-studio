@@ -475,6 +475,72 @@ pub fn apply_overrides(
     Ok(path)
 }
 
+// ── marked binds ─────────────────────────────────────────────────────────
+// Studio-owned launcher binds live in the override block as `bindd` lines
+// whose description is a fixed marker — that's how each feature finds its
+// own bind again without touching anything else in the block.
+
+fn is_marked(o: &Override, desc: &str) -> bool {
+    matches!(o, Override::Set(cb) if cb.description.as_deref() == Some(desc))
+}
+
+/// The Studio-owned bind carrying `desc` as its marker, if installed.
+pub fn find_marked(paths: &OmarchyPaths, desc: &str) -> Option<ConfigBind> {
+    read_overrides(paths).into_iter().find_map(|o| match o {
+        Override::Set(cb) if cb.description.as_deref() == Some(desc) => Some(cb),
+        _ => None,
+    })
+}
+
+/// Bind `mods+key` to `exec` under the `desc` marker (replacing any previous
+/// bind with the same marker), through the shared override block — sourced
+/// last, so it wins over an Omarchy default on the same chord. Reloads
+/// Hyprland. Caller snapshots [`user_bindings_path`] first.
+pub fn install_marked(
+    paths: &OmarchyPaths,
+    desc: &str,
+    mods: &str,
+    key: &str,
+    exec: &str,
+    runner: &dyn crate::cmd::CommandRunner,
+) -> Result<ConfigBind> {
+    let bind = ConfigBind {
+        flags: "bindd".into(),
+        modmask: mods_to_mask(mods),
+        key: key.to_string(),
+        description: Some(desc.to_string()),
+        dispatcher: "exec".into(),
+        arg: exec.to_string(),
+    };
+    let mut overrides: Vec<Override> = read_overrides(paths)
+        .into_iter()
+        .filter(|o| !is_marked(o, desc))
+        .collect();
+    overrides.push(Override::Set(bind.clone()));
+    apply_overrides(paths, &overrides, runner)?;
+    Ok(bind)
+}
+
+/// Remove the `desc`-marked bind (other overrides survive). Returns false
+/// when none was installed. Caller snapshots first.
+pub fn remove_marked(
+    paths: &OmarchyPaths,
+    desc: &str,
+    runner: &dyn crate::cmd::CommandRunner,
+) -> Result<bool> {
+    let all = read_overrides(paths);
+    let kept: Vec<Override> = all
+        .iter()
+        .filter(|o| !is_marked(o, desc))
+        .cloned()
+        .collect();
+    if kept.len() == all.len() {
+        return Ok(false);
+    }
+    apply_overrides(paths, &kept, runner)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

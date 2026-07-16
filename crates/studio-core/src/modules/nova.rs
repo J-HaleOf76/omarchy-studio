@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::configfs::atomic_write;
 use crate::error::{Result, StudioError};
-use crate::modules::keybinds::{self, ConfigBind, Override};
+use crate::modules::keybinds::{self, ConfigBind};
 use crate::omarchy::OmarchyPaths;
 
 /// The four visual modes, in Nova's own cycle order.
@@ -171,18 +171,9 @@ pub fn launch_command(paths: &OmarchyPaths) -> Option<String> {
     None
 }
 
-fn is_nova_bind(o: &Override) -> bool {
-    matches!(o, Override::Set(cb) if cb.description.as_deref() == Some(BIND_DESC))
-}
-
 /// Studio's Nova bind from the override block, if installed.
 pub fn keybind(paths: &OmarchyPaths) -> Option<ConfigBind> {
-    keybinds::read_overrides(paths)
-        .into_iter()
-        .find_map(|o| match o {
-            Override::Set(cb) if cb.description.as_deref() == Some(BIND_DESC) => Some(cb),
-            _ => None,
-        })
+    keybinds::find_marked(paths, BIND_DESC)
 }
 
 /// Bind `mods+key` to launch Nova (replacing any previous Nova bind), through
@@ -196,21 +187,7 @@ pub fn install_keybind(
     exec: &str,
     runner: &dyn crate::cmd::CommandRunner,
 ) -> Result<ConfigBind> {
-    let bind = ConfigBind {
-        flags: "bindd".into(),
-        modmask: keybinds::mods_to_mask(mods),
-        key: key.to_string(),
-        description: Some(BIND_DESC.into()),
-        dispatcher: "exec".into(),
-        arg: exec.to_string(),
-    };
-    let mut overrides: Vec<Override> = keybinds::read_overrides(paths)
-        .into_iter()
-        .filter(|o| !is_nova_bind(o))
-        .collect();
-    overrides.push(Override::Set(bind.clone()));
-    keybinds::apply_overrides(paths, &overrides, runner)?;
-    Ok(bind)
+    keybinds::install_marked(paths, BIND_DESC, mods, key, exec, runner)
 }
 
 /// Remove the Nova bind from the override block (other overrides survive).
@@ -219,19 +196,14 @@ pub fn remove_keybind(
     paths: &OmarchyPaths,
     runner: &dyn crate::cmd::CommandRunner,
 ) -> Result<bool> {
-    let all = keybinds::read_overrides(paths);
-    let kept: Vec<Override> = all.iter().filter(|o| !is_nova_bind(o)).cloned().collect();
-    if kept.len() == all.len() {
-        return Ok(false);
-    }
-    keybinds::apply_overrides(paths, &kept, runner)?;
-    Ok(true)
+    keybinds::remove_marked(paths, BIND_DESC, runner)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cmd::StubRunner;
+    use crate::modules::keybinds::Override;
 
     fn fake_paths(tag: &str) -> OmarchyPaths {
         let nanos = std::time::SystemTime::now()
@@ -324,7 +296,13 @@ mod tests {
         // reinstall with a new chord replaces, not duplicates
         install_keybind(&paths, "SUPER SHIFT", "N", "/x/nova", &runner).unwrap();
         let binds: Vec<_> = keybinds::read_overrides(&paths);
-        assert_eq!(binds.iter().filter(|o| is_nova_bind(o)).count(), 1);
+        let nova_binds = binds
+            .iter()
+            .filter(
+                |o| matches!(o, Override::Set(cb) if cb.description.as_deref() == Some(BIND_DESC)),
+            )
+            .count();
+        assert_eq!(nova_binds, 1);
         assert_eq!(keybind(&paths).unwrap().key, "N");
 
         assert!(remove_keybind(&paths, &runner).unwrap());

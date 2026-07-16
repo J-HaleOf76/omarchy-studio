@@ -304,6 +304,78 @@ fn theme(args: &[&str]) -> i32 {
                 }
             }
         }
+        // Instant theme from whatever wallpaper is on screen (0.9.2). Name
+        // is optional — defaults to the wallpaper's file stem, auto-suffixed
+        // when taken, so the keybind can run non-interactively.
+        ["new", rest @ ..] if rest.contains(&"--from-current-wallpaper") => {
+            use studio_core::modules::extraction::{extract_image, Bias, Mode};
+            use studio_core::modules::wizard::{current_background, materialize, unique_name};
+            let image = match current_background(&paths) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", brief(e));
+                    return 1;
+                }
+            };
+            let base = rest
+                .first()
+                .filter(|a| !a.starts_with('-'))
+                .map(|s| s.to_string())
+                .or_else(|| image.file_stem().map(|s| s.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "wallpaper".to_string());
+            let name = unique_name(&paths, &base);
+            let flag = |k: &str| {
+                rest.iter()
+                    .position(|a| *a == k)
+                    .and_then(|i| rest.get(i + 1))
+            };
+            let mode = flag("--mode")
+                .and_then(|s| Mode::parse(s))
+                .unwrap_or(Mode::Normal);
+            let bias = flag("--bias")
+                .and_then(|s| Bias::parse(s))
+                .unwrap_or(Bias::Auto);
+            let ex = match extract_image(&image, mode, bias) {
+                Ok(ex) => ex,
+                Err(e) => {
+                    eprintln!(
+                        "couldn't extract from {}: {} (video wallpapers can't be extracted)",
+                        image.display(),
+                        brief(e)
+                    );
+                    return 1;
+                }
+            };
+            match materialize(&paths, &name, &image, &ex) {
+                Ok(dir) => {
+                    let slug = dir.file_name().unwrap_or_default().to_string_lossy();
+                    println!(
+                        "theme `{slug}` crafted from {} ({} · {})",
+                        image.display(),
+                        mode.label(),
+                        if ex.light { "light" } else { "dark" }
+                    );
+                    if rest.contains(&"--apply") {
+                        match RealRunner.run(&cmds::theme_set(&slug)) {
+                            Ok(o) if o.ok() => println!("applied."),
+                            _ => {
+                                eprintln!(
+                                    "created, but omarchy-theme-set failed — apply from the TUI"
+                                );
+                                return 1;
+                            }
+                        }
+                    } else {
+                        println!("apply with: omarchy-studio theme apply {slug}");
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("could not create the theme: {e:?}");
+                    1
+                }
+            }
+        }
         // Preview a palette extracted from an image (spec 04 §4). The
         // theme-from-wallpaper wizard (0.6.5) builds on this; here it prints
         // the colors.toml so the result is scriptable today.
@@ -392,6 +464,87 @@ fn theme(args: &[&str]) -> i32 {
                 }
             }
         }
+        // Opt-in instant-theme keybind (0.9.2): SUPER+SHIFT+T by default,
+        // runs `theme new --from-current-wallpaper --apply` non-interactively.
+        ["keybind"] | ["keybind", "show"] => {
+            use studio_core::modules::keybinds::{find_marked, render_chord};
+            use studio_core::modules::wizard::BIND_DESC;
+            match find_marked(&paths, BIND_DESC) {
+                Some(b) => println!("{} → {}", render_chord(b.modmask, &b.key), b.arg),
+                None => println!("no instant-theme keybind installed"),
+            }
+            0
+        }
+        ["keybind", verb @ ("install" | "remove"), chord @ ..] => {
+            use studio_core::modules::keybinds::{
+                self, install_marked, remove_marked, render_chord,
+            };
+            use studio_core::modules::wizard::BIND_DESC;
+            let files = [keybinds::user_bindings_path(&paths)];
+            let snap = history().ok();
+            let action = if *verb == "remove" {
+                if !chord.is_empty() {
+                    eprintln!("usage: theme keybind remove");
+                    return 2;
+                }
+                if let Some(s) = &snap {
+                    let _ = s.record(
+                        SnapshotKind::Pre,
+                        "before theme keybind remove",
+                        &files,
+                        "themes",
+                        &[],
+                    );
+                }
+                match remove_marked(&paths, BIND_DESC, &RealRunner) {
+                    Ok(true) => "instant-theme keybind removed".to_string(),
+                    Ok(false) => {
+                        println!("no instant-theme keybind installed");
+                        return 0;
+                    }
+                    Err(e) => {
+                        eprintln!("remove failed: {e:?}");
+                        return 1;
+                    }
+                }
+            } else {
+                let (mods, key) = match chord {
+                    [] => ("SUPER SHIFT", "T"),
+                    [m, k] => (*m, *k),
+                    _ => {
+                        eprintln!(
+                            "usage: theme keybind install [MODS KEY]   (e.g. \"SUPER SHIFT\" T)"
+                        );
+                        return 2;
+                    }
+                };
+                if let Some(s) = &snap {
+                    let _ = s.record(
+                        SnapshotKind::Pre,
+                        "before theme keybind install",
+                        &files,
+                        "themes",
+                        &[],
+                    );
+                }
+                let exec = "omarchy-studio theme new --from-current-wallpaper --apply";
+                match install_marked(&paths, BIND_DESC, mods, key, exec, &RealRunner) {
+                    Ok(b) => format!(
+                        "{} crafts + applies a theme from the current wallpaper",
+                        render_chord(b.modmask, &b.key)
+                    ),
+                    Err(e) => {
+                        eprintln!("install failed: {e:?}");
+                        return 1;
+                    }
+                }
+            };
+            if let Some(s) = &snap {
+                let _ = s.record(SnapshotKind::Post, &action, &files, "themes", &[]);
+            }
+            println!("{action} · undo with `omarchy-studio snapshot undo`");
+            0
+        }
         ["community", rest @ ..] => {
             use studio_core::modules::community::{catalog, matches};
             let installed: std::collections::HashSet<String> =
@@ -466,8 +619,9 @@ fn theme(args: &[&str]) -> i32 {
             eprintln!(
                 "usage: omarchy-studio theme list | current | apply <name> | fork <src> <new> \
                  | new <name> --from-image <path> [--mode normal|muted|material] [--bias auto|dark|light] [--apply] \
+                 | new [name] --from-current-wallpaper [--apply] \
                  | extract <image> [normal|muted|material] [auto|dark|light] \
-                 | community list|search|install"
+                 | keybind install|remove|show | community list|search|install"
             );
             2
         }

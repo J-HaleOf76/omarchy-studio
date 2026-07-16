@@ -28,6 +28,36 @@ const PREVIEW_W: u32 = 480;
 const PREVIEW_THUMB_H: u32 = 270;
 const PREVIEW_STRIP_H: u32 = 28;
 
+/// Marker description on the optional instant-theme keybind (ROADMAP 0.9.2).
+pub const BIND_DESC: &str = "Theme from current wallpaper";
+
+/// The wallpaper currently on screen — target of the `current/background`
+/// link Omarchy's bg-set scripts maintain.
+pub fn current_background(paths: &OmarchyPaths) -> Result<PathBuf> {
+    let link = paths.config.join("current/background");
+    std::fs::read_link(&link).map_err(|_| StudioError::External {
+        cmd: "theme new".into(),
+        detail: format!(
+            "no current wallpaper recorded at {} — set one first",
+            link.display()
+        ),
+    })
+}
+
+/// A theme name that won't collide: `base` if its slug is free, else the
+/// first free `base-2`, `base-3`, … — what lets the instant-theme keybind
+/// run non-interactively without clobber-or-fail.
+pub fn unique_name(paths: &OmarchyPaths, base: &str) -> String {
+    let themes = paths.config.join("themes");
+    if !themes.join(slugify(base)).exists() {
+        return base.to_string();
+    }
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|cand| !themes.join(slugify(cand)).exists())
+        .expect("some suffix is free")
+}
+
 /// Write the theme dir. Returns its path. The image must be decodable (the
 /// wizard only admits stills/gifs); `preview.png` is best-effort — a theme
 /// without a preview beats no theme.
@@ -175,6 +205,26 @@ mod tests {
         assert!(materialize(&paths, "Jade City", &img, &ex).is_err());
         // and a nameless theme is refused
         assert!(materialize(&paths, "   ", &img, &ex).is_err());
+    }
+
+    #[test]
+    fn unique_name_skips_taken_slugs() {
+        let paths = fake_paths("uniq");
+        assert_eq!(unique_name(&paths, "Jade City"), "Jade City");
+        std::fs::create_dir_all(paths.config.join("themes/jade-city")).unwrap();
+        assert_eq!(unique_name(&paths, "Jade City"), "Jade City-2");
+        std::fs::create_dir_all(paths.config.join("themes/jade-city-2")).unwrap();
+        assert_eq!(unique_name(&paths, "Jade City"), "Jade City-3");
+    }
+
+    #[test]
+    fn current_background_follows_the_link() {
+        let paths = fake_paths("curbg");
+        assert!(current_background(&paths).is_err());
+        let img = test_image(paths.config.parent().unwrap());
+        std::fs::create_dir_all(paths.config.join("current")).unwrap();
+        std::os::unix::fs::symlink(&img, paths.config.join("current/background")).unwrap();
+        assert_eq!(current_background(&paths).unwrap(), img);
     }
 
     #[test]
