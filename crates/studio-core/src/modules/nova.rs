@@ -1,31 +1,32 @@
-//! Nova launcher — the Quickshell app-search overlay (github arino08/nova).
+//! Nice Launcher — the Quickshell app-search overlay (github arino08/nova).
 //!
-//! Nova is spawned per-invocation from a keybind and reads its whole config at
-//! launch from `~/.config/nova/nova.json`, so "apply" here is just an atomic
-//! save — there is no daemon to restart and the next launch picks it up.
-//! Theme-sync is free: Nova reads the active Omarchy `colors.toml` itself.
+//! Nice Launcher is spawned per-invocation from a keybind and reads its whole
+//! config at launch from `~/.config/nova/nova.json`, so "apply" here is just an
+//! atomic save — there is no daemon to restart and the next launch picks it up.
+//! Theme-sync is free: Nice Launcher reads the active Omarchy `colors.toml`.
 //!
 //! Studio owns three things:
 //!   * the JSON config (visual mode, providers, backdrop, animation toggles) —
-//!     unknown keys round-trip untouched so a newer Nova never loses fields;
+//!     unknown keys round-trip untouched so a newer version never loses fields;
 //!   * an optional launch keybind, written as a `bindd` line through the
 //!     keybinds override block (same managed block, same undo story);
-//!   * launch detection — the run script of a checkout at `~/Projects/nova`.
+//!   * install + launch detection — `nice-launcher` on PATH via XDG install.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::cmd::CommandRunner;
 use crate::configfs::atomic_write;
 use crate::error::{Result, StudioError};
 use crate::modules::keybinds::{self, ConfigBind};
 use crate::omarchy::OmarchyPaths;
 
-/// The four visual modes, in Nova's own cycle order.
+/// The four visual modes, in Nice Launcher's own cycle order.
 pub const MODES: [&str; 4] = ["constellation", "spotlight", "orbital", "grid"];
 
-/// Elephant providers Nova's default config searches. `symbols`/`unicode`
-/// exist but are excluded from Nova's defaults (they bury real hits).
+/// Elephant providers Nice Launcher's default config searches. `symbols`/
+/// `unicode` exist but are excluded from the defaults (they bury real hits).
 pub const KNOWN_PROVIDERS: [&str; 10] = [
     "desktopapplications",
     "calc",
@@ -40,7 +41,16 @@ pub const KNOWN_PROVIDERS: [&str; 10] = [
 ];
 
 /// Marker description on the managed keybind line (how we find ours again).
-pub const BIND_DESC: &str = "Nova launcher";
+pub const BIND_DESC: &str = "Nice Launcher";
+
+/// GitHub repo for the Nice Launcher project.
+pub const REPO_URL: &str = "https://github.com/arino08/nova.git";
+
+/// Binary name installed to `~/.local/bin/`.
+const BIN_NAME: &str = "nice-launcher";
+
+/// Data directory name under `~/.local/share/`.
+const DATA_DIR_NAME: &str = "nice-launcher";
 
 fn config_json(paths: &OmarchyPaths) -> PathBuf {
     paths
@@ -77,7 +87,7 @@ impl Default for AnimCfg {
     }
 }
 
-/// `nova.json`, defaults matching Nova's bundled `config/nova.json`.
+/// `nova.json`, defaults matching Nice Launcher's bundled `config/nova.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct NovaConfig {
@@ -121,7 +131,7 @@ impl Default for NovaConfig {
     }
 }
 
-/// The Nova config file, loaded (or defaulted) and editable in place.
+/// The Nice Launcher config file, loaded (or defaulted) and editable in place.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Nova {
     path: PathBuf,
@@ -143,8 +153,8 @@ impl Nova {
         &self.path
     }
 
-    /// Write nova.json (pretty, trailing newline). Takes effect on Nova's next
-    /// launch — nothing to restart. Caller snapshots first.
+    /// Write nova.json (pretty, trailing newline). Takes effect on Nice
+    /// Launcher's next launch — nothing to restart. Caller snapshots first.
     pub fn save(&self) -> Result<()> {
         let json =
             serde_json::to_string_pretty(&self.cfg).map_err(|e| StudioError::ParseFailed {
@@ -156,29 +166,152 @@ impl Nova {
     }
 }
 
-/// The command that launches Nova: the run script of a checkout at
-/// `~/Projects/nova`, when present. None → nothing to bind or launch.
-pub fn launch_command(paths: &OmarchyPaths) -> Option<String> {
-    let home = paths.config.parent()?.parent()?.to_path_buf();
-    let script = home.join("Projects/nova/nova");
-    if script.is_file() {
-        return Some(script.display().to_string());
-    }
-    let shell = home.join("Projects/nova/shell.qml");
-    if shell.is_file() {
-        return Some(format!("qs -n -p {}", home.join("Projects/nova").display()));
+/// The command that launches Nice Launcher. Looks for `nice-launcher` on
+/// PATH (the XDG install puts it at `~/.local/bin/nice-launcher`). Returns
+/// `None` when Nice Launcher isn't installed.
+pub fn launch_command(runner: &dyn CommandRunner) -> Option<String> {
+    // Check PATH for the installed binary.
+    let cmd = crate::cmd::Cmd::new("which").arg(BIN_NAME);
+    if let Ok(out) = runner.run(&cmd) {
+        let path = out.stdout.trim().to_string();
+        if out.ok() && !path.is_empty() {
+            return Some(path);
+        }
     }
     None
 }
 
-/// Studio's Nova bind from the override block, if installed.
+/// Install directory for the QML application data.
+fn data_dir() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
+        })
+        .join(DATA_DIR_NAME)
+}
+
+/// Install path for the launch script.
+fn bin_path() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        .join(".local/bin")
+        .join(BIN_NAME)
+}
+
+/// Whether Nice Launcher is installed (the launch script exists on disk).
+pub fn is_installed() -> bool {
+    bin_path().is_file()
+}
+
+/// Install Nice Launcher: clone the repo to a temp dir, copy QML files +
+/// assets + config to `~/.local/share/nice-launcher/`, write a launch script
+/// to `~/.local/bin/nice-launcher`. Returns the install path on success.
+pub fn install(runner: &dyn CommandRunner) -> Result<PathBuf> {
+    let data = data_dir();
+    let bin = bin_path();
+
+    // Clone into a temp directory.
+    let tmp = std::env::temp_dir().join(format!(
+        "nice-launcher-install-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let clone = crate::cmd::Cmd::new("git")
+        .arg("clone")
+        .arg("--depth=1")
+        .arg(REPO_URL)
+        .arg(tmp.display().to_string());
+    let out = runner.run(&clone).map_err(|_| StudioError::External {
+        cmd: "git clone".into(),
+        detail: "failed to clone the Nice Launcher repository — is git installed?".into(),
+    })?;
+    if !out.ok() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(StudioError::External {
+            cmd: "git clone".into(),
+            detail: out.stderr.trim().to_string(),
+        });
+    }
+
+    // Create destination dirs.
+    std::fs::create_dir_all(&data)?;
+    if let Some(parent) = bin.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Copy application files (shell.qml, qml/, config/, assets/).
+    for entry in ["shell.qml", "qml", "config", "assets"] {
+        let src = tmp.join(entry);
+        if src.exists() {
+            copy_recursive(&src, &data.join(entry))?;
+        }
+    }
+
+    // Write the launch script.
+    let script = format!(
+        "#!/usr/bin/env bash\n\
+         # Nice Launcher — launch script (installed by omarchy-studio)\n\
+         set -euo pipefail\n\
+         exec qs -n -p {:?}\n",
+        data
+    );
+    std::fs::write(&bin, script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // Clean up temp dir.
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    Ok(bin)
+}
+
+/// Remove the Nice Launcher installation.
+pub fn uninstall() -> Result<bool> {
+    let data = data_dir();
+    let bin = bin_path();
+    let existed = bin.is_file() || data.is_dir();
+    if bin.is_file() {
+        std::fs::remove_file(&bin)?;
+    }
+    if data.is_dir() {
+        std::fs::remove_dir_all(&data)?;
+    }
+    Ok(existed)
+}
+
+/// Recursively copy a file or directory tree.
+fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            // Skip hidden dirs like .git
+            if name.to_string_lossy().starts_with('.') {
+                continue;
+            }
+            copy_recursive(&entry.path(), &dst.join(name))?;
+        }
+    } else {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(src, dst)?;
+    }
+    Ok(())
+}
+
+/// Studio's Nice Launcher bind from the override block, if installed.
 pub fn keybind(paths: &OmarchyPaths) -> Option<ConfigBind> {
     keybinds::find_marked(paths, BIND_DESC)
 }
 
-/// Bind `mods+key` to launch Nova (replacing any previous Nova bind), through
-/// the shared keybinds override block — sourced last, so it wins over the
-/// Omarchy default on the same chord (e.g. SUPER+SPACE's Walker). Reloads
+/// Bind `mods+key` to launch Nice Launcher (replacing any previous bind),
+/// through the shared keybinds override block — sourced last, so it wins over
+/// the Omarchy default on the same chord (e.g. SUPER+SPACE's Walker). Reloads
 /// Hyprland. Caller snapshots `keybinds::user_bindings_path` first.
 pub fn install_keybind(
     paths: &OmarchyPaths,
@@ -190,8 +323,8 @@ pub fn install_keybind(
     keybinds::install_marked(paths, BIND_DESC, mods, key, exec, runner)
 }
 
-/// Remove the Nova bind from the override block (other overrides survive).
-/// Returns false when none was installed. Caller snapshots first.
+/// Remove the Nice Launcher bind from the override block (other overrides
+/// survive). Returns false when none was installed. Caller snapshots first.
 pub fn remove_keybind(
     paths: &OmarchyPaths,
     runner: &dyn crate::cmd::CommandRunner,

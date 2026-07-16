@@ -124,7 +124,7 @@ impl Screen {
             Screen::Monitors => "Monitors",
             Screen::Tweaks => "Tweaks",
             Screen::Battery => "Power",
-            Screen::Nova => "Nova",
+            Screen::Nova => "Nice Launcher",
             Screen::Doctor => "Doctor",
         }
     }
@@ -668,13 +668,14 @@ impl App {
                 NovaAction::None => {}
                 NovaAction::Apply => self.nova_apply(),
                 NovaAction::ToggleBind => self.nova_toggle_bind(),
+                NovaAction::Install => self.nova_install(),
                 NovaAction::Launch => {
                     let exec = self.nova.launch_exec().map(str::to_string);
                     match exec {
-                        Some(e) => self.launch_tool(&e, "Nova", false),
+                        Some(e) => self.launch_tool(&e, "Nice Launcher", false),
                         None => {
                             self.toast = Some(Toast {
-                                text: "no Nova checkout found at ~/Projects/nova".into(),
+                                text: "Nice Launcher is not installed".into(),
                                 ok: false,
                             });
                         }
@@ -683,7 +684,7 @@ impl App {
                 NovaAction::Refresh => {
                     self.nova.reload(&self.paths);
                     self.toast = Some(Toast {
-                        text: "Re-read Nova config".into(),
+                        text: "Re-read Nice Launcher config".into(),
                         ok: true,
                     });
                 }
@@ -703,7 +704,7 @@ impl App {
         }
     }
 
-    /// Snapshot + save nova.json. Nova reads it at launch — nothing to restart.
+    /// Snapshot + save nova.json. Nice Launcher reads it at launch — nothing to restart.
     fn nova_apply(&mut self) {
         let files = [self.nova.model().config_path().to_path_buf()];
         let store = SnapshotStore::open_or_init(
@@ -714,7 +715,7 @@ impl App {
         if let Some(s) = &store {
             let _ = s.record(
                 SnapshotKind::Pre,
-                "before nova config save",
+                "before Nice Launcher config save",
                 &files,
                 "nova",
                 &[],
@@ -723,11 +724,11 @@ impl App {
         match self.nova.model().save() {
             Ok(()) => {
                 if let Some(s) = &store {
-                    let _ = s.record(SnapshotKind::Post, "nova config save", &files, "nova", &[]);
+                    let _ = s.record(SnapshotKind::Post, "Nice Launcher config save", &files, "nova", &[]);
                 }
                 self.nova.saved();
                 self.toast = Some(Toast {
-                    text: "Nova config saved — applies on next launch".into(),
+                    text: "Nice Launcher config saved — applies on next launch".into(),
                     ok: true,
                 });
             }
@@ -740,7 +741,7 @@ impl App {
         }
     }
 
-    /// Install the Nova launch bind (SUPER+SPACE) if absent, remove it if
+    /// Install the Nice Launcher launch bind (SUPER+SPACE) if absent, remove it if
     /// present — through the shared keybinds override block, snapshot-backed.
     fn nova_toggle_bind(&mut self) {
         use studio_core::modules::keybinds;
@@ -754,7 +755,7 @@ impl App {
         if let Some(s) = &store {
             let _ = s.record(
                 SnapshotKind::Pre,
-                "before nova keybind change",
+                "before Nice Launcher keybind change",
                 &files,
                 "nova",
                 &[],
@@ -762,21 +763,21 @@ impl App {
         }
         let result = if nova_mod::keybind(&self.paths).is_some() {
             nova_mod::remove_keybind(&self.paths, &RealRunner)
-                .map(|_| "Nova keybind removed".to_string())
+                .map(|_| "Nice Launcher keybind removed".to_string())
         } else {
-            match nova_mod::launch_command(&self.paths) {
+            match nova_mod::launch_command(&RealRunner) {
                 Some(exec) => {
                     nova_mod::install_keybind(&self.paths, "SUPER", "SPACE", &exec, &RealRunner)
                         .map(|b| {
                             format!(
-                                "{} launches Nova",
+                                "{} launches Nice Launcher",
                                 keybinds::render_chord(b.modmask, &b.key)
                             )
                         })
                 }
                 None => Err(studio_core::error::StudioError::External {
-                    cmd: "nova".into(),
-                    detail: "no Nova checkout found at ~/Projects/nova".into(),
+                    cmd: "nice-launcher".into(),
+                    detail: "Nice Launcher is not installed".into(),
                 }),
             }
         };
@@ -785,7 +786,7 @@ impl App {
                 if let Some(s) = &store {
                     let _ = s.record(
                         SnapshotKind::Post,
-                        "nova keybind change",
+                        "Nice Launcher keybind change",
                         &files,
                         "nova",
                         &[],
@@ -797,6 +798,30 @@ impl App {
             Err(e) => {
                 self.toast = Some(Toast {
                     text: format!("keybind: {}", brief(e)),
+                    ok: false,
+                });
+            }
+        }
+    }
+
+    /// Install Nice Launcher from GitHub via XDG layout.
+    fn nova_install(&mut self) {
+        use studio_core::modules::nova as nova_mod;
+        self.toast = Some(Toast {
+            text: "Installing Nice Launcher...".into(),
+            ok: true,
+        });
+        match nova_mod::install(&RealRunner) {
+            Ok(bin) => {
+                self.nova.reload(&self.paths);
+                self.toast = Some(Toast {
+                    text: format!("Installed to {}", bin.display()),
+                    ok: true,
+                });
+            }
+            Err(e) => {
+                self.toast = Some(Toast {
+                    text: format!("install failed: {}", brief(e)),
                     ok: false,
                 });
             }

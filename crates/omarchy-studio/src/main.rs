@@ -1480,8 +1480,8 @@ fn nova(args: &[&str]) -> i32 {
     // Verbs that don't touch nova.json.
     match args {
         ["launch"] => {
-            let Some(exec) = nova_mod::launch_command(&paths) else {
-                eprintln!("no Nova checkout found at ~/Projects/nova");
+            let Some(exec) = nova_mod::launch_command(&RealRunner) else {
+                eprintln!("Nice Launcher is not installed");
                 return 1;
             };
             let cmd = studio_core::cmd::Cmd::new("sh")
@@ -1489,7 +1489,7 @@ fn nova(args: &[&str]) -> i32 {
                 .arg(format!("setsid {exec} >/dev/null 2>&1 &"));
             return match RealRunner.run(&cmd) {
                 Ok(out) if out.ok() => {
-                    println!("launched Nova");
+                    println!("launched Nice Launcher");
                     0
                 }
                 _ => {
@@ -1501,7 +1501,7 @@ fn nova(args: &[&str]) -> i32 {
         ["keybind"] | ["keybind", "show"] => {
             match nova_mod::keybind(&paths) {
                 Some(b) => println!("{} → {}", render_chord(b.modmask, &b.key), b.arg),
-                None => println!("no Nova keybind installed"),
+                None => println!("no Nice Launcher keybind installed"),
             }
             return 0;
         }
@@ -1525,7 +1525,7 @@ fn nova(args: &[&str]) -> i32 {
                 match nova_mod::remove_keybind(&paths, &RealRunner) {
                     Ok(true) => "nova keybind removed".to_string(),
                     Ok(false) => {
-                        println!("no Nova keybind installed");
+                        println!("no Nice Launcher keybind installed");
                         return 0;
                     }
                     Err(e) => {
@@ -1544,8 +1544,8 @@ fn nova(args: &[&str]) -> i32 {
                         return 2;
                     }
                 };
-                let Some(exec) = nova_mod::launch_command(&paths) else {
-                    eprintln!("no Nova checkout found at ~/Projects/nova");
+                let Some(exec) = nova_mod::launch_command(&RealRunner) else {
+                    eprintln!("Nice Launcher is not installed");
                     return 1;
                 };
                 if let Some(s) = &store {
@@ -1558,7 +1558,7 @@ fn nova(args: &[&str]) -> i32 {
                     );
                 }
                 match nova_mod::install_keybind(&paths, mods, key, &exec, &RealRunner) {
-                    Ok(b) => format!("{} launches Nova", render_chord(b.modmask, &b.key)),
+                    Ok(b) => format!("{} launches Nice Launcher", render_chord(b.modmask, &b.key)),
                     Err(e) => {
                         eprintln!("install failed: {e:?}");
                         return 1;
@@ -1570,6 +1570,34 @@ fn nova(args: &[&str]) -> i32 {
             }
             println!("{action} · undo with `omarchy-studio snapshot undo`");
             return 0;
+        }
+        ["install"] => {
+            match nova_mod::install(&RealRunner) {
+                Ok(path) => {
+                    println!("Installed Nice Launcher to {}", path.display());
+                    return 0;
+                }
+                Err(e) => {
+                    eprintln!("install failed: {e:?}");
+                    return 1;
+                }
+            }
+        }
+        ["uninstall"] => {
+            match nova_mod::uninstall() {
+                Ok(true) => {
+                    println!("Uninstalled Nice Launcher");
+                    return 0;
+                }
+                Ok(false) => {
+                    println!("Nice Launcher was not installed");
+                    return 0;
+                }
+                Err(e) => {
+                    eprintln!("uninstall failed: {e:?}");
+                    return 1;
+                }
+            }
         }
         _ => {}
     }
@@ -1595,9 +1623,9 @@ fn nova(args: &[&str]) -> i32 {
                 Some(b) => println!("keybind           {}", render_chord(b.modmask, &b.key)),
                 None => println!("keybind           none"),
             }
-            match nova_mod::launch_command(&paths) {
+            match nova_mod::launch_command(&RealRunner) {
                 Some(cmd) => println!("launch            {cmd}"),
-                None => println!("launch            (no checkout at ~/Projects/nova)"),
+                None => println!("launch            (not installed)"),
             }
             return 0;
         }
@@ -1706,7 +1734,7 @@ fn nova(args: &[&str]) -> i32 {
             eprintln!(
                 "usage: nova show | mode <{}> | set blur|glow <on|off> | set opacity <0.5..1> | set limit <n> \
                  | anim stagger|living|spring|micro <on|off> | anim stagger-ms <n> \
-                 | providers [add|remove <name>] | keybind [install [MODS KEY]|remove|show] | launch",
+                 | providers [add|remove <name>] | keybind [install [MODS KEY]|remove|show] | launch | install | uninstall",
                 MODES.join("|")
             );
             return 2;
@@ -1729,7 +1757,7 @@ fn nova(args: &[&str]) -> i32 {
             if let Some(s) = &store {
                 let _ = s.record(SnapshotKind::Post, &summary, &files, "nova", &[]);
             }
-            println!("{summary} · takes effect on Nova's next launch");
+            println!("{summary} · takes effect on Nice Launcher's next launch");
             0
         }
         Err(e) => {

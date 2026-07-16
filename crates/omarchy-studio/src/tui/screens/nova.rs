@@ -1,8 +1,8 @@
-//! Nova screen — configure the Nova launcher (visual mode, backdrop,
+//! Nice Launcher screen — configure the Nice Launcher (visual mode, backdrop,
 //! animation toggles), install/remove its launch keybind, and launch it.
 //!
-//! Every edit is local until `s` applies (snapshot → atomic save). Nova reads
-//! the file at launch, so a save simply takes effect the next time it opens.
+//! Every edit is local until `s` applies (snapshot → atomic save). Nice Launcher
+//! reads the file at launch, so a save simply takes effect the next time it opens.
 //! Providers are CLI-only (`omarchy-studio nova providers …`) — reordering a
 //! search blend is not a ←/→ kind of edit.
 
@@ -24,7 +24,9 @@ pub enum NovaAction {
     Apply,
     /// Install the launch keybind if absent, remove it if present.
     ToggleBind,
-    /// Spawn Nova now (detached).
+    /// Install Nice Launcher from GitHub.
+    Install,
+    /// Spawn Nice Launcher now (detached).
     Launch,
     Refresh,
 }
@@ -46,7 +48,7 @@ impl NovaScreen {
         Self {
             model: Nova::load(paths),
             bind: nova::keybind(paths).map(|b| render_chord(b.modmask, &b.key)),
-            launch: nova::launch_command(paths),
+            launch: nova::launch_command(&studio_core::cmd::RealRunner),
             row: 0,
             dirty: false,
         }
@@ -105,6 +107,7 @@ impl NovaScreen {
             KeyCode::Right | KeyCode::Char(' ') => self.step(1),
             KeyCode::Char('s') | KeyCode::Enter => return NovaAction::Apply,
             KeyCode::Char('b') => return NovaAction::ToggleBind,
+            KeyCode::Char('i') => return NovaAction::Install,
             KeyCode::Char('l') => return NovaAction::Launch,
             KeyCode::Char('r') => return NovaAction::Refresh,
             _ => {}
@@ -118,7 +121,8 @@ impl NovaScreen {
         } else {
             "b keybind"
         };
-        format!("↑↓ row · ←→ adjust · s save · {bind} · l launch · r re-read")
+        let install = if nova::is_installed() { "" } else { " · i install" };
+        format!("↑↓ row · ←→ adjust · s save · {bind}{install} · l launch · r re-read")
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin) {
@@ -141,14 +145,14 @@ impl NovaScreen {
 
         let mut lines: Vec<Line> = Vec::new();
         let state = if !self.model.existed && !self.dirty {
-            "using Nova's bundled defaults (no nova.json yet — s creates it)"
+            "using Nice Launcher's bundled defaults (no nova.json yet — s creates it)"
         } else if self.dirty {
-            "edited — s saves (Nova reads it on next launch)"
+            "edited — s saves (Nice Launcher reads it on next launch)"
         } else {
             "saved"
         };
         lines.push(Line::from(vec![
-            Span::styled("  Nova launcher", skin.dim()),
+            Span::styled("  Nice Launcher", skin.dim()),
             Span::styled(
                 format!("   {state}"),
                 if self.dirty { skin.warn() } else { skin.dim() },
@@ -185,7 +189,7 @@ impl NovaScreen {
             Some(chord) => lines.push(Line::from(vec![
                 Span::styled("  keybind   ", skin.dim()),
                 Span::styled(chord.clone(), skin.accent_bold()),
-                Span::styled("  launches Nova (b removes it)", skin.dim()),
+                Span::styled("  launches Nice Launcher (b removes it)", skin.dim()),
             ])),
             None => lines.push(Line::from(vec![
                 Span::styled("  keybind   ", skin.dim()),
@@ -202,7 +206,7 @@ impl NovaScreen {
                 Span::styled(cmd.clone(), skin.body()),
             ])),
             None => lines.push(Line::from(Span::styled(
-                "  launch    no Nova checkout found at ~/Projects/nova",
+                "  launch    Nice Launcher is not installed (press 'i' to install)",
                 skin.warn(),
             ))),
         }
