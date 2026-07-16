@@ -1,8 +1,5 @@
 # Roadmap
 
-**🚨 ACTIVE TEMPORARY FIXES (ATTENTION NEXT AGENT):**
-- **Updates (`omarchy-studio update`):** GitHub release binaries are currently failing/missing for the release tag. `studio-core::modules::update::apply()` has been temporarily hacked to run the curl `install.sh` script instead of downloading the binary directly. This will block/freeze the TUI/CLI during cargo build, but works as a temporary fix. **Do not revert this until the GitHub Actions release workflow successfully builds and attaches the `omarchy-studio-linux-x86_64` binary to a tag.**
-
 Milestones from PRD §12, broken into issue-sized tasks. Order within a milestone is the suggested build order; `[spec]` links say where the how lives. Estimates assume part-time solo work.
 
 ## v0.1 — Skeleton + Themes (~3 wks) — *exit: create & apply a custom theme end-to-end with undo, from the Omarchy menu*
