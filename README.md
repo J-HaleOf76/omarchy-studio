@@ -15,28 +15,53 @@ o m a r c h y
 [![CI status](https://img.shields.io/github/actions/workflow/status/arino08/omarchy-studio/ci.yml?branch=main&style=flat-square&color=a6e3a1)](https://github.com/arino08/omarchy-studio/actions/workflows/ci.yml)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux%20%7C%20wayland-89b4fa?style=flat-square)](https://github.com/arino08/omarchy-studio)
 
-**The one-stop theming cockpit for [Omarchy](https://omarchy.org)** — themes, palettes, keybinds, look & feel, animations, Waybar, notifications, OSD, and lock/idle, all editable from a keyboard-driven TUI (or scriptable CLI) with git-backed one-key undo. No config-file jargon required — but the raw file is always one keystroke away.
+**Rice your [Omarchy](https://omarchy.org) desktop without editing a single config file.**
+
+Themes, keybinds, Waybar, animations, monitors, notifications — one keyboard-driven TUI, every change snapshotted to git, all of it undone with one key. There's a CLI twin for every screen when you'd rather script it.
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (264 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, v0.8 (configurator parity+) is complete, and v0.9 (community & differentiation) is complete and released as v0.9.0. Tested against Omarchy 3.8 / Hyprland 0.55.
+```bash
+curl -sL https://raw.githubusercontent.com/arino08/omarchy-studio/main/install.sh | sh
+omarchy-studio
+```
 
-## Contents
-- [Why](#why)
-- [What works today](#what-works-today)
-- [Install](#install)
-- [Updating](#updating)
-- [Quick start — the TUI](#quick-start--the-tui)
-- [CLI reference](#cli-reference)
-- [Design pillars](#design-pillars)
-- [Repository map](#repository-map)
-- [License](#license)
+> **Status: alpha, and honest about it.** Everything below is built, tested (264 tests, plus the TUI itself driven in a pty on every CI run) and drives the real Omarchy config on disk. v0.9.0 is the current release. Tested against Omarchy 3.8 / Hyprland 0.55 — Studio warns, but never refuses to run, on versions it hasn't seen.
 
 ## Why
 
-Omarchy's menu covers *picking* a theme; everything past that is hand-editing five config dialects across four directory trees, with no discoverability and no undo. The community solved colors six times over — nobody built the control center for the *behavioral* half: keybinds, animations, bar layout, notification behavior. Studio does both, natively, and integrates with the tools that already exist.
+Omarchy's menu picks a theme. Everything past that is hand-editing five config dialects across four directory trees, with no discoverability and no undo — and one typo in `hyprland.conf` away from a session that won't come back.
+
+The community has solved colors six times over. Nobody built the control centre for the *behavioural* half: keybinds, animations, bar layout, notification rules, displays. Studio does both, and it does them the careful way: **it never writes to Omarchy's own files**, so `omarchy-update` can't clobber your work and your work can't break the update.
+
+## Nothing you do here is one-way
+
+This is the part that matters, so it's not buried at the bottom:
+
+- **Every change is a git commit.** Studio snapshots the files before and after it touches them. `omarchy-studio snapshot undo` reverses the last change; the Snapshots screen browses the whole history with a diff and restores any point — and the restore is itself snapshotted.
+- **A change that breaks your desktop rolls itself back.** Applies are verified (`hyprctl configerrors`, is the bar still alive?) and reverted automatically when the check fails. The Waybar watchdog is why you can't lock yourself out of your own bar.
+- **Your hand-edits survive.** Edits are comment-preserving span splices into managed blocks, not rewrites. Studio's changes and yours coexist byte-for-byte, and drift is detected rather than steamrolled.
+- **Omarchy's vendored files are never touched.** Only user-owned files and sanctioned extension surfaces, applied through `omarchy-theme-set` and friends.
+
+## What it looks like
+
+| | |
+|---|---|
+| ![Themes with live preview](docs/assets/themes.png) | ![Wallpaper browser with in-terminal previews](docs/assets/wallpapers.png) |
+| ![Theme-from-wallpaper wizard](docs/assets/wizard.png) | ![Doctor health view](docs/assets/doctor.png) |
 
 ## What works today
+
+**Look:** themes with a live preview (the theme's wallpaper plus a mock terminal in its palette), a 114-theme community browser that previews a theme's wallpaper *before* installing it, wallpapers with in-terminal previews from four sources, wallhaven search without leaving the TUI, and a wizard that builds a complete theme out of any image.
+
+**Behaviour:** keybinds with live capture, 56 Hyprland look-and-feel settings with live preview on every adjust, animation presets, Waybar module layout with a crash-watchdog, mako notification rules, swayosd geometry, the hypridle timeline, and displays.
+
+**System:** safe app removal with a real `pacman -Rs` cascade preview, power profiles and battery thresholds, one-key reversible tweaks, and a Doctor that tells you what's wrong in one screen.
+
+**Moving and keeping:** rice bundles that carry a whole setup to another machine and replay it through the same verified pipeline, a keymap cheatsheet exported to themed HTML, theme-sync so fzf and lazygit follow your colours, and a self-updater that defers to pacman when it should.
+
+<details>
+<summary><strong>Every module in detail</strong> (what you can do, and when it landed)</summary>
 
 | Module | What you can do | Since |
 |---|---|---|
@@ -66,32 +91,30 @@ Omarchy's menu covers *picking* a theme; everything past that is hand-editing fi
 | **Theme sync** | Opt-in tools that follow your Omarchy theme — fzf and lazygit re-tint from the active `colors.toml` on every theme switch (via the `theme-set` hook). Studio never rewrites the tool's own config: it generates standalone files wired in through a single `~/.bashrc` managed block. CLI `themesync list`/`enable <tool>`/`apply` | v0.7 |
 | **Self-update** | Daily release check; `U` in the TUI (or `omarchy-studio update`) downloads, swaps, and restarts — hands off to pacman for packaged installs | v0.7 |
 
-Every change is snapshotted to a git-backed history — undo with a single command or key.
 
-
-
-| | |
-|---|---|
-| ![Themes with live preview](docs/assets/themes.png) | ![Wallpaper browser with in-terminal previews](docs/assets/wallpapers.png) |
-| ![Theme-from-wallpaper wizard](docs/assets/wizard.png) | ![Doctor health view](docs/assets/doctor.png) |
+</details>
 
 ## Install
 
-Requires a Rust toolchain (1.96+) and an Omarchy system (Arch + Hyprland).
+Needs an Omarchy system (Arch + Hyprland). The installer downloads a release binary — no Rust toolchain required.
 
-**One-shot install:**
 ```bash
 curl -sL https://raw.githubusercontent.com/arino08/omarchy-studio/main/install.sh | sh
 ```
 
-**Build from source:**
+It installs over whatever `omarchy-studio` is already on your `PATH` (or `~/.local/bin`), checks that what it downloaded is really a binary before replacing anything, and prints the version it installed.
+
+<details>
+<summary>Build from source instead (needs Rust 1.95+)</summary>
+
 ```bash
 git clone https://github.com/arino08/omarchy-studio
 cd omarchy-studio
 cargo build --release
-# binary at ./target/release/omarchy-studio — copy it onto your PATH:
 install -Dm755 target/release/omarchy-studio ~/.local/bin/omarchy-studio
 ```
+
+</details>
 
 Optional — add Studio to the Omarchy menu as a floating terminal app:
 
@@ -105,23 +128,6 @@ Recommended — install the update-survival hooks so Studio's changes live throu
 omarchy-studio hooks install          # undo with: omarchy-studio hooks remove
 ```
 
-## Updating
-
-Studio keeps itself current. On launch the TUI checks GitHub for a newer release (once a day, off-thread, silent when offline); when one exists the keybar shows **`U` update!** — press it and Studio downloads the release binary, swaps it in place, and restarts itself. The same flow is scriptable:
-
-```bash
-omarchy-studio update           # check + install + tell you to restart
-omarchy-studio update --check   # just report
-```
-
-If the binary is owned by a pacman package (AUR install), Studio never touches it — it tells you to update through your package manager instead. Two knobs in `~/.config/omarchy-studio/config.toml`:
-
-```toml
-[update]
-check = false   # disable the launch check entirely
-auto = true     # swap + restart without waiting for U
-```
-
 ## Quick start — the TUI
 
 ```bash
@@ -133,10 +139,11 @@ omarchy-studio          # launch the full-screen cockpit
 | <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | next / previous module |
 | <kbd>Ctrl</kbd>+<kbd>j</kbd>/<kbd>k</kbd>, <kbd>Ctrl</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd> | globally cycle through modules |
 | **Mouse Click** | click rail tabs to instantly switch modules |
-| <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> | jump straight to a module |
+| <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> | jump to one of the first ten modules (from the rail) |
 | <kbd>j</kbd> / <kbd>k</kbd>, arrows | move within a screen |
 | <kbd>h</kbd> / <kbd>l</kbd> | adjust the selected value |
 | <kbd>Enter</kbd> | open a picker (avatar, theme, …) |
+| <kbd>c</kbd> | (themes) browse the community directory — preview before installing |
 | <kbd>t</kbd> | (wallpapers) craft a theme from the selected image |
 | <kbd>w</kbd> | (wallpapers) browse wallhaven.cc — enter sets, `t` themes |
 | <kbd>o</kbd> | (wallpapers) open in imv / mpv |
@@ -262,13 +269,32 @@ omarchy-studio --help | <command> --help  # the command list, and each command's
 
 </details>
 
+## Updating
+
+Studio keeps itself current. On launch the TUI checks GitHub for a newer release (once a day, off-thread, silent when offline); when one exists the keybar shows **`U` update!** — press it and Studio downloads the release binary, swaps it in place, and restarts itself. The same flow is scriptable:
+
+```bash
+omarchy-studio update           # check + install + tell you to restart
+omarchy-studio update --check   # just report
+```
+
+If the binary is owned by a pacman package (AUR install), Studio never touches it — it tells you to update through your package manager instead. Two knobs in `~/.config/omarchy-studio/config.toml`:
+
+```toml
+[update]
+check = false   # disable the launch check entirely
+auto = true     # swap + restart without waiting for U
+```
+
 ## Design pillars
 
-1. **Never fight Omarchy** — write only to user-owned files and sanctioned extension surfaces; apply through `omarchy-theme-set` / `omarchy-theme-refresh` / `omarchy-restart-*`.
-2. **The file is still the truth** — comment-preserving, span-splice edits; your hand-edits and Studio's edits coexist byte-for-byte.
-3. **Show, don't describe** — live preview and confirm-or-revert; a Waybar config that crashes the bar rolls itself back.
-4. **Undo is sacred** — git-backed snapshots of every change Studio makes.
-5. **Never strand the user** — a missing dependency is a visible-but-disabled feature with the exact install command, never a silent failure.
+The five rules every feature is held to. The first four are why [nothing here is one-way](#nothing-you-do-here-is-one-way); the fifth is why a half-supported feature is never a silent failure.
+
+1. **Never fight Omarchy** — only user-owned files and sanctioned extension surfaces.
+2. **The file is still the truth** — comment-preserving span splices; your edits and Studio's coexist byte-for-byte.
+3. **Show, don't describe** — live preview and confirm-or-revert, not a form you submit and hope.
+4. **Undo is sacred** — git-backed snapshots of every change.
+5. **Never strand the user** — a missing dependency is a visible-but-disabled feature carrying the exact install command.
 
 ## Repository map
 
@@ -278,11 +304,13 @@ omarchy-studio --help | <command> --help  # the command list, and each command's
 | `docs/specs/` | Build specs — the *how* (start at `00-overview.md`) |
 | `ROADMAP.md` | Milestones broken into issue-sized tasks |
 | `docs/comparison.md` | How Studio compares to A La Carchy |
-| `docs/handoff-v0.8.md` | Architecture guide for the v0.8/v0.9 milestones |
+| `docs/handoff-v0.8.md`, `docs/handoff-v0.9.md` | Architecture guides for the v0.8 / v0.9 milestones |
 | `crates/studio-core/` | Engine library: config model, comment-preserving parsers, apply pipeline, snapshots, Omarchy adapter |
 | `crates/omarchy-studio/` | The binary: TUI + CLI frontends |
 | `tools/termshot/` | Renders tmux captures to the README media (screenshots + tour GIF) |
-| `data/` | Bundled presets and the integrations registry |
+| `tools/e2e.sh` | Drives the TUI in a tmux pty against a fixture Omarchy — the CI journey test |
+| `packaging/aur/` | PKGBUILD, refreshed against a released tag by `tools/refresh-pkgbuild.sh` |
+| `data/animation-presets/` | Reference animation blocks (the shipped presets are compiled in) |
 
 ## License
 
