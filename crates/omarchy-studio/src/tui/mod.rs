@@ -2011,7 +2011,7 @@ impl App {
             b.render(f, cols[1], &self.skin, &mut self.images);
         }
         if let Some(b) = &self.community {
-            b.render(f, cols[1], &self.skin);
+            b.render(f, cols[1], &self.skin, &mut self.images);
         }
         if let Some(w) = &self.wizard {
             w.render(f, cols[1], &self.skin);

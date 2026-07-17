@@ -20,7 +20,7 @@
 | Domain | A La Carchy | Omarchy Studio (today) | Studio plan |
 |---|---|---|---|
 | Theme creation | pywal wallpaper theming ("Themarchy") | palette editor, theme fork, median-cut extraction wizard (Normal/Muted/Material), in-TUI wallhaven browser | instant theme-from-current-wallpaper one-liner (0.9.2) |
-| Community themes | 252 one-click installs | — | browser **with pre-install palette preview** (0.9.1) |
+| Community themes | 252 one-click installs | — | browser **with pre-install wallpaper + palette preview** (0.9.1) |
 | Keybinds | guided 3-step rebind, conflict warnings | live chord capture, conflict detection, per-bind source attribution, snapshot-backed overrides | cheatsheet export (0.9.5) |
 | Hyprland settings | 69 settings (general/decoration/input/gestures) | 56 settings across Windows/Layout/Behavior/Decoration/Blur/Shadow/Input/Touchpad with **live preview**, presets, try/apply/undo — every keyword verified against the shipped Hyprland (0.8.1) | gesture add/remove UI |
 | Custom config paths | fixed paths | per-module target overrides + running-bar `-c/-s` detection, three-tier resolution (0.8.2) | — |

@@ -9,6 +9,12 @@
 //! repo into the user themes dir **and applies it** — Studio never
 //! reimplements that pipeline.
 
+use serde::Deserialize;
+
+/// Wallpaper extensions previewable in-terminal — stills only, matching the
+/// Themes screen (a theme's `backgrounds/` may also hold video wallpapers).
+const STILL_EXTS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
+
 /// One directory entry: a display name and its GitHub `owner/repo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommunityTheme {
@@ -46,6 +52,67 @@ impl CommunityTheme {
             ),
         ]
     }
+
+    /// Contents-API listing of the theme's `backgrounds/` directory. Raw
+    /// URLs can't list a directory and wallpaper file names are arbitrary,
+    /// so the wallpaper preview needs the API — which is rate-limited to 60
+    /// requests an hour unauthenticated, hence the on-disk cache above it.
+    pub fn backgrounds_url(&self) -> String {
+        format!(
+            "https://api.github.com/repos/{}/contents/backgrounds",
+            self.repo
+        )
+    }
+}
+
+/// A wallpaper file in a theme repo, from the contents API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Background {
+    pub name: String,
+    pub download_url: String,
+}
+
+impl Background {
+    /// Lowercased extension, for the cache file name.
+    pub fn ext(&self) -> String {
+        self.name
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_lowercase())
+            .unwrap_or_else(|| "jpg".to_string())
+    }
+}
+
+#[derive(Deserialize)]
+struct ContentEntry {
+    name: String,
+    #[serde(rename = "type")]
+    kind: String,
+    download_url: Option<String>,
+}
+
+/// First still wallpaper in a contents listing, by name — the same "first
+/// background, sorted" rule the Themes screen previews installed themes
+/// with, so a theme looks the same before and after installing. `None` when
+/// the listing holds no still image (or isn't a directory listing at all —
+/// a missing `backgrounds/` returns a JSON error object, not an array).
+pub fn first_background(listing_json: &str) -> Option<Background> {
+    let entries: Vec<ContentEntry> = serde_json::from_str(listing_json).ok()?;
+    let mut stills: Vec<Background> = entries
+        .into_iter()
+        .filter(|e| e.kind == "file")
+        .filter_map(|e| {
+            let ext = e.name.rsplit_once('.')?.1.to_lowercase();
+            if !STILL_EXTS.contains(&ext.as_str()) {
+                return None;
+            }
+            Some(Background {
+                name: e.name,
+                download_url: e.download_url?,
+            })
+        })
+        .collect();
+    stills.sort_by(|a, b| a.name.cmp(&b.name));
+    stills.into_iter().next()
 }
 
 /// The embedded directory, in the manual's order. Malformed lines are
@@ -124,6 +191,47 @@ mod tests {
         );
         assert!(t.colors_urls()[0].contains("/main/colors.toml"));
         assert!(t.colors_urls()[1].contains("/master/colors.toml"));
+        assert_eq!(
+            t.backgrounds_url(),
+            "https://api.github.com/repos/bjarneo/omarchy-ash-theme/contents/backgrounds"
+        );
+    }
+
+    #[test]
+    fn first_background_takes_the_first_still_by_name() {
+        let listing = r#"[
+          {"name": "notes.md", "type": "file", "download_url": "https://x/notes.md"},
+          {"name": "nested", "type": "dir", "download_url": null},
+          {"name": "2-blue.PNG", "type": "file", "download_url": "https://x/2-blue.PNG"},
+          {"name": "clip.mp4", "type": "file", "download_url": "https://x/clip.mp4"},
+          {"name": "1-ash.jpg", "type": "file", "download_url": "https://x/1-ash.jpg"}
+        ]"#;
+        let bg = first_background(listing).expect("a still is listed");
+        assert_eq!(bg.name, "1-ash.jpg");
+        assert_eq!(bg.download_url, "https://x/1-ash.jpg");
+        assert_eq!(bg.ext(), "jpg");
+
+        // Uppercase extensions still count as stills.
+        let upper = r#"[{"name": "A.PNG", "type": "file", "download_url": "https://x/A.PNG"}]"#;
+        assert_eq!(
+            first_background(upper).map(|b| b.ext()).as_deref(),
+            Some("png")
+        );
+    }
+
+    #[test]
+    fn a_listing_with_no_still_is_none_not_a_panic() {
+        // video-only backgrounds dir
+        assert!(first_background(
+            r#"[{"name":"a.mp4","type":"file","download_url":"https://x/a.mp4"}]"#
+        )
+        .is_none());
+        // empty dir
+        assert!(first_background("[]").is_none());
+        // GitHub's 404 body: an object, not an array
+        assert!(first_background(r#"{"message":"Not Found"}"#).is_none());
+        // not JSON at all
+        assert!(first_background("<html>rate limited</html>").is_none());
     }
 
     #[test]

@@ -1,18 +1,22 @@
 //! Community themes browser (ROADMAP 0.9.1) — `c` in the Themes screen.
 //!
-//! Browses the vendored extra-themes directory with a pre-install palette
-//! preview: selecting a theme fetches its raw `colors.toml` off GitHub on a
-//! worker thread and renders swatch strips before anything touches disk —
-//! the look-before-you-install step `omarchy-theme-install` alone can't
-//! give. Installing shells to `omarchy-theme-install`, which clones the
-//! repo *and applies the theme immediately* — the keybar says so.
+//! Browses the vendored extra-themes directory with a pre-install preview
+//! built like the Themes screen's: selecting a theme fetches its wallpaper
+//! and its raw `colors.toml` off GitHub on a worker thread and renders the
+//! thumb over swatch strips before anything touches disk — the
+//! look-before-you-install step `omarchy-theme-install` alone can't give.
+//! Installing shells to `omarchy-theme-install`, which clones the repo *and
+//! applies the theme immediately* — the keybar says so.
 //!
 //! Same worker discipline as the wallhaven browser: one thread owns the
 //! network and the install command, the UI sends [`Job`]s and drains
 //! [`Outcome`]s, and the event loop polls only while something is in
-//! flight.
+//! flight. Wallpapers land in an on-disk cache beside the wallhaven thumbs,
+//! because listing a repo's `backgrounds/` costs a GitHub API call and those
+//! are capped at 60 an hour unauthenticated.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -25,13 +29,21 @@ use ratatui::Frame;
 use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::modules::community::{self, CommunityTheme};
 use studio_core::modules::themes::Palette;
-use studio_core::modules::wallhaven::{Fetch, FetchError, HttpFetch};
+use studio_core::modules::wallhaven::{Fetch, FetchError, HttpFetch, ThumbCache};
 use studio_core::omarchy::cmds;
 
+use super::super::imagecell::ImageCell;
 use super::super::theme::Skin;
+
+/// Wallpaper cache cap — one still per theme, 114 themes in the directory.
+const WALL_CACHE_CAP: u64 = 100 * 1024 * 1024;
+
+/// Rows the palette + repo + install note need under a wallpaper thumb.
+const TEXT_ROWS: u16 = 7;
 
 enum Job {
     Preview(CommunityTheme),
+    Wallpaper(CommunityTheme),
     Install(CommunityTheme),
 }
 
@@ -39,6 +51,10 @@ enum Outcome {
     Preview {
         repo: String,
         result: Result<String, String>,
+    },
+    Wallpaper {
+        repo: String,
+        result: Result<PathBuf, String>,
     },
     Installed {
         name: String,
@@ -65,6 +81,12 @@ enum PreviewState {
     Missing(String),
 }
 
+/// What we know about a theme's wallpaper after trying to fetch it.
+enum WallState {
+    Ready(PathBuf),
+    Missing(String),
+}
+
 /// The selected theme's `colors.toml`, parsed into renderable cells.
 struct PalettePreview {
     bg: Color,
@@ -77,6 +99,10 @@ struct PalettePreview {
 
 fn worker(jobs: Receiver<Job>, out: Sender<Outcome>) {
     let fetch = HttpFetch::new();
+    let cache = ThumbCache::new(
+        studio_core::studio_cache_dir().join("community"),
+        WALL_CACHE_CAP,
+    );
     for job in jobs {
         let outcome = match job {
             Job::Preview(t) => {
@@ -100,6 +126,16 @@ fn worker(jobs: Receiver<Job>, out: Sender<Outcome>) {
                     }
                 }
                 Outcome::Preview {
+                    repo: t.repo,
+                    result,
+                }
+            }
+            Job::Wallpaper(t) => {
+                let result = match &cache {
+                    Ok(c) => wallpaper(&fetch, c, &t),
+                    Err(e) => Err(format!("no wallpaper cache: {e:?}")),
+                };
+                Outcome::Wallpaper {
                     repo: t.repo,
                     result,
                 }
@@ -131,6 +167,42 @@ fn worker(jobs: Receiver<Job>, out: Sender<Outcome>) {
     }
 }
 
+/// Cache key for a theme's wallpaper — the repo, flattened to one path
+/// segment (`owner/repo` → `owner-repo`).
+fn wall_id(repo: &str) -> String {
+    repo.replace('/', "-")
+}
+
+/// A theme's wallpaper, from the cache or off GitHub: list `backgrounds/`
+/// through the contents API, take the first still, download it, cache it.
+/// Every failure is a sentence for the preview pane, never fatal — a theme
+/// with no wallpaper still previews its palette.
+fn wallpaper(fetch: &dyn Fetch, cache: &ThumbCache, t: &CommunityTheme) -> Result<PathBuf, String> {
+    let id = wall_id(&t.repo);
+    if let Some(hit) = cache.get(&id) {
+        return Ok(hit);
+    }
+    let listing = fetch.get(&t.backgrounds_url()).map_err(|e| match e {
+        FetchError::Status(404) => "this theme ships no backgrounds/".to_string(),
+        // The API allows 60 anonymous calls an hour, per IP.
+        FetchError::Status(403) | FetchError::Status(429) => {
+            "GitHub API rate limit — wallpapers return within the hour".to_string()
+        }
+        FetchError::Status(code) => format!("HTTP {code}"),
+        FetchError::Network(e) => e,
+    })?;
+    let listing = String::from_utf8(listing).map_err(|_| "listing is not UTF-8".to_string())?;
+    let bg = community::first_background(&listing)
+        .ok_or_else(|| "no still wallpaper in backgrounds/".to_string())?;
+    let bytes = fetch.get(&bg.download_url).map_err(|e| match e {
+        FetchError::Status(code) => format!("HTTP {code} fetching {}", bg.name),
+        FetchError::Network(e) => e,
+    })?;
+    cache
+        .put(&id, &bg.ext(), &bytes)
+        .map_err(|e| format!("caching {}: {}", bg.name, brief(e)))
+}
+
 fn brief(e: studio_core::StudioError) -> String {
     match e {
         studio_core::StudioError::External { detail, .. } => detail,
@@ -148,6 +220,8 @@ pub struct CommunityBrowser {
     selected: usize,
     previews: HashMap<String, PreviewState>,
     preview_inflight: Option<String>,
+    walls: HashMap<String, WallState>,
+    wall_inflight: Option<String>,
     /// Name of the theme currently being installed, if any.
     installing: Option<String>,
     error: Option<String>,
@@ -163,7 +237,7 @@ impl CommunityBrowser {
         let (out_tx, out_rx) = channel();
         std::thread::spawn(move || worker(jobs_rx, out_tx));
         let mut b = Self::with_channels(jobs_tx, out_rx, installed);
-        b.ensure_preview();
+        b.ensure_selected();
         b
     }
 
@@ -181,6 +255,8 @@ impl CommunityBrowser {
             selected: 0,
             previews: HashMap::new(),
             preview_inflight: None,
+            walls: HashMap::new(),
+            wall_inflight: None,
             installing: None,
             error: None,
             jobs,
@@ -190,7 +266,7 @@ impl CommunityBrowser {
 
     /// Is anything in flight? Drives the event loop's poll-vs-block choice.
     pub fn busy(&self) -> bool {
-        self.installing.is_some() || self.preview_inflight.is_some()
+        self.installing.is_some() || self.preview_inflight.is_some() || self.wall_inflight.is_some()
     }
 
     fn visible(&self) -> Vec<&CommunityTheme> {
@@ -204,18 +280,21 @@ impl CommunityBrowser {
         self.visible().get(self.selected).map(|t| (*t).clone())
     }
 
-    /// Make sure the selected theme's palette is on its way: known states
-    /// are used immediately, a miss becomes a worker job (one at a time).
-    fn ensure_preview(&mut self) {
+    /// Make sure the selected theme's palette and wallpaper are on their
+    /// way: known states are used immediately, a miss becomes a worker job
+    /// (one of each kind at a time, so scrolling can't flood the queue).
+    fn ensure_selected(&mut self) {
         let Some(t) = self.selected_theme() else {
             return;
         };
-        if self.previews.contains_key(&t.repo) {
-            return;
-        }
-        if self.preview_inflight.as_deref() != Some(&t.repo) {
+        if !self.previews.contains_key(&t.repo) && self.preview_inflight.as_deref() != Some(&t.repo)
+        {
             self.preview_inflight = Some(t.repo.clone());
-            let _ = self.jobs.send(Job::Preview(t));
+            let _ = self.jobs.send(Job::Preview(t.clone()));
+        }
+        if !self.walls.contains_key(&t.repo) && self.wall_inflight.as_deref() != Some(&t.repo) {
+            self.wall_inflight = Some(t.repo.clone());
+            let _ = self.jobs.send(Job::Wallpaper(t));
         }
     }
 
@@ -238,7 +317,18 @@ impl CommunityBrowser {
                     };
                     self.previews.insert(repo, state);
                     // Selection may have moved while this one was in flight.
-                    self.ensure_preview();
+                    self.ensure_selected();
+                }
+                Ok(Outcome::Wallpaper { repo, result }) => {
+                    if self.wall_inflight.as_deref() == Some(&repo) {
+                        self.wall_inflight = None;
+                    }
+                    let state = match result {
+                        Ok(path) => WallState::Ready(path),
+                        Err(e) => WallState::Missing(e),
+                    };
+                    self.walls.insert(repo, state);
+                    self.ensure_selected();
                 }
                 Ok(Outcome::Installed { name, slug, result }) => {
                     self.installing = None;
@@ -264,7 +354,7 @@ impl CommunityBrowser {
                     self.filter = self.input.take().unwrap_or_default();
                     self.selected = 0;
                     self.error = None;
-                    self.ensure_preview();
+                    self.ensure_selected();
                 }
                 KeyCode::Esc => self.input = None,
                 KeyCode::Backspace => {
@@ -278,7 +368,7 @@ impl CommunityBrowser {
 
         let n = self.visible().len();
         if crate::tui::ui::list_nav(key.code, &mut self.selected, n) {
-            self.ensure_preview();
+            self.ensure_selected();
             return CommunityAction::None;
         }
         match key.code {
@@ -314,7 +404,7 @@ impl CommunityBrowser {
         }
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin) {
+    pub fn render(&self, f: &mut Frame, area: Rect, skin: &Skin, images: &mut ImageCell) {
         f.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -379,7 +469,7 @@ impl CommunityBrowser {
             .constraints([Constraint::Length(40), Constraint::Min(20)])
             .split(rows[2]);
         self.render_list(f, cols[0], skin);
-        self.render_preview(f, cols[1], skin);
+        self.render_preview(f, cols[1], skin, images);
     }
 
     fn render_list(&self, f: &mut Frame, area: Rect, skin: &Skin) {
@@ -424,7 +514,7 @@ impl CommunityBrowser {
         f.render_widget(List::new(items), area);
     }
 
-    fn render_preview(&self, f: &mut Frame, area: Rect, skin: &Skin) {
+    fn render_preview(&self, f: &mut Frame, area: Rect, skin: &Skin, images: &mut ImageCell) {
         let Some(t) = self.selected_theme() else {
             return;
         };
@@ -436,6 +526,27 @@ impl CommunityBrowser {
             .title(Span::styled(format!(" {} ", t.name), skin.dim()));
         let inner = block.inner(area);
         f.render_widget(block, area);
+
+        // The theme's wallpaper above its palette, like the Themes screen —
+        // colours alone don't tell you what a rice looks like. Falls back to
+        // palette-only when the pane is short or the wallpaper never landed.
+        let wall = match self.walls.get(&t.repo) {
+            Some(WallState::Ready(p)) => Some(p),
+            _ => None,
+        };
+        let (wall_area, text_area) = match wall {
+            Some(_) if inner.height >= TEXT_ROWS + 5 => {
+                let split = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Min(3), Constraint::Length(TEXT_ROWS)])
+                    .split(inner);
+                (Some(split[0]), split[1])
+            }
+            _ => (None, inner),
+        };
+        if let (Some(wa), Some(wp)) = (wall_area, wall) {
+            images.render(f, wa, wp);
+        }
 
         let mut lines: Vec<Line> = Vec::new();
         match self.previews.get(&t.repo) {
@@ -478,6 +589,20 @@ impl CommunityBrowser {
                 )));
             }
         }
+        // Only worth a line when there's no thumb to speak for itself.
+        if wall_area.is_none() {
+            lines.push(Line::from(Span::styled(
+                match self.walls.get(&t.repo) {
+                    Some(WallState::Missing(e)) => format!("no wallpaper: {e}"),
+                    Some(WallState::Ready(_)) => "wallpaper needs a taller pane".to_string(),
+                    None if self.wall_inflight.as_deref() == Some(&t.repo) => {
+                        "fetching wallpaper…".to_string()
+                    }
+                    None => "no wallpaper yet".to_string(),
+                },
+                skin.dim(),
+            )));
+        }
         lines.push(Line::default());
         lines.push(Line::from(Span::styled(
             format!("github.com/{}", t.repo),
@@ -494,7 +619,7 @@ impl CommunityBrowser {
             },
             if on_disk { skin.body() } else { skin.dim() },
         )));
-        f.render_widget(Paragraph::new(lines), inner);
+        f.render_widget(Paragraph::new(lines), text_area);
     }
 }
 
@@ -577,18 +702,24 @@ color1 = "#c05b5b"
     #[test]
     fn selection_requests_one_preview_at_a_time() {
         let (mut b, jobs, out) = browser();
-        b.ensure_preview();
-        let first = match jobs.try_recv() {
-            Ok(Job::Preview(t)) => t,
-            _ => panic!("selection should request its palette"),
+        b.ensure_selected();
+        let (first, wall) = match (jobs.try_recv(), jobs.try_recv()) {
+            (Ok(Job::Preview(t)), Ok(Job::Wallpaper(w))) => (t, w),
+            _ => panic!("selection should request its palette and its wallpaper"),
         };
+        assert_eq!(first, wall, "both jobs describe the selected theme");
         assert!(b.busy());
-        // A second poke while in flight must not double-request.
-        b.ensure_preview();
+        // A second poke while either is in flight must not double-request.
+        b.ensure_selected();
         assert!(jobs.try_recv().is_err());
         out.send(Outcome::Preview {
             repo: first.repo.clone(),
             result: Ok(JADE.to_string()),
+        })
+        .unwrap();
+        out.send(Outcome::Wallpaper {
+            repo: first.repo.clone(),
+            result: Ok(PathBuf::from("/x/ash.jpg")),
         })
         .unwrap();
         assert!(b.drain().is_none());
@@ -597,6 +728,40 @@ color1 = "#c05b5b"
             b.previews.get(&first.repo),
             Some(PreviewState::Ready(_))
         ));
+        assert!(matches!(
+            b.walls.get(&first.repo),
+            Some(WallState::Ready(p)) if p == &PathBuf::from("/x/ash.jpg")
+        ));
+    }
+
+    #[test]
+    fn a_wallpaperless_theme_still_previews_its_palette() {
+        let (mut b, _jobs, out) = browser();
+        b.wall_inflight = Some("x/y".into());
+        out.send(Outcome::Wallpaper {
+            repo: "x/y".into(),
+            result: Err("this theme ships no backgrounds/".into()),
+        })
+        .unwrap();
+        assert!(b.drain().is_none());
+        assert!(matches!(b.walls.get("x/y"), Some(WallState::Missing(_))));
+        assert!(
+            b.wall_inflight.as_deref() != Some("x/y"),
+            "a missing wallpaper isn't a stuck request"
+        );
+        assert!(
+            b.error.is_none(),
+            "it's a preview note, not an error banner"
+        );
+    }
+
+    #[test]
+    fn wallpaper_cache_ids_are_one_path_segment() {
+        assert_eq!(
+            wall_id("bjarneo/omarchy-ash-theme"),
+            "bjarneo-omarchy-ash-theme"
+        );
+        assert!(!wall_id("a/b").contains('/'));
     }
 
     #[test]
