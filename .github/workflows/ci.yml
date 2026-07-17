@@ -45,3 +45,9 @@ jobs:
             echo "$leak" >&2
             exit 1
           fi
+
+      # `include_str!` can reach outside the crate and still build here, then
+      # ship a crate that can't compile — the theme catalog did exactly that.
+      # Packaging with verification builds studio-core from its own tarball.
+      - name: studio-core packages for crates.io
+        run: cargo package -p studio-core --locked

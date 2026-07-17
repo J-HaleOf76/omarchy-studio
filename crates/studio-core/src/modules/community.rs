@@ -3,8 +3,10 @@
 //! theme before installing it — the raw `colors.toml` URLs the browser
 //! fetches and the install slug `omarchy-theme-install` will produce.
 //!
-//! The catalog is embedded at build time from `data/community-themes.tsv`
-//! (name<TAB>owner/repo); re-scrape with `tools/refresh-themes.sh`.
+//! The catalog is embedded at build time from the crate's own
+//! `data/community-themes.tsv` (name<TAB>owner/repo) — inside the package,
+//! not at the repo root, or `cargo publish` ships a crate that can't build.
+//! Re-scrape with `tools/refresh-themes.sh`.
 //! Installing always shells to `omarchy-theme-install`, which clones the
 //! repo into the user themes dir **and applies it** — Studio never
 //! reimplements that pipeline.
@@ -118,7 +120,7 @@ pub fn first_background(listing_json: &str) -> Option<Background> {
 /// The embedded directory, in the manual's order. Malformed lines are
 /// skipped rather than failing the whole catalog.
 pub fn catalog() -> Vec<CommunityTheme> {
-    include_str!("../../../../data/community-themes.tsv")
+    include_str!("../../data/community-themes.tsv")
         .lines()
         .filter_map(|line| {
             let (name, repo) = line.split_once('\t')?;

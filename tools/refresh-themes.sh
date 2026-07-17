@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Re-scrape the Omarchy extra-themes directory into data/community-themes.tsv.
+# Re-scrape the Omarchy extra-themes directory into the studio-core crate.
+# The catalog lives inside the crate (not at the repo root) because
+# include_str! can't reach outside a package cargo publish would ship.
 # Run from the repo root; review the diff before committing — the manual's
 # markup is informal and entries occasionally move or vanish.
 set -euo pipefail
 
 URL="https://learn.omacom.io/2/the-omarchy-manual/90/extra-themes"
-OUT="$(dirname "$0")/../data/community-themes.tsv"
+OUT="$(dirname "$0")/../crates/studio-core/data/community-themes.tsv"
 
 curl -fsSL "$URL" |
   # Anchor lines look like: <a href="https://github.com/owner/repo">Name</a>
