@@ -863,8 +863,11 @@ fn snapshot(args: &[&str]) -> i32 {
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("no such snapshot `{id}`: {}", brief(e));
+                Err(_) => {
+                    // The store is a git repo, but that's our business — a
+                    // bad id used to surface git's "ambiguous argument …
+                    // use '--' to separate paths from revisions" verbatim.
+                    eprintln!("no such snapshot `{id}` — see `omarchy-studio snapshot log`");
                     return 1;
                 }
             }
@@ -948,6 +951,11 @@ fn looknfeel(args: &[&str]) -> i32 {
             0
         }
         ["set", key, value] => {
+            // Same courtesy as `get`: a mistyped key names the way out.
+            if lookup(key).is_none() {
+                eprintln!("unknown setting `{key}` — see `looknfeel list`");
+                return 2;
+            }
             let mut lf = LookFeel::load(&paths);
             if let Err(e) = lf.set(key, value) {
                 eprintln!("{e}");
