@@ -40,6 +40,20 @@ jobs:
             exit 1
           fi
 
+      # The AUR package can only ever track a released tag, so it's checked
+      # here rather than in CI (where Cargo.toml legitimately runs ahead).
+      # It drifted to pkgver=0.0.1 against a tag that never existed once.
+      - name: Check the AUR package tracks the previous release
+        run: |
+          pkg=$(sed -n 's/^pkgver=//p' packaging/aur/PKGBUILD | head -1)
+          src=$(sed -n 's/^\tpkgver = //p' packaging/aur/.SRCINFO | head -1)
+          if [ "$pkg" != "$src" ]; then
+            echo "PKGBUILD ($pkg) and .SRCINFO ($src) disagree — run tools/refresh-pkgbuild.sh" >&2
+            exit 1
+          fi
+          echo "AUR package currently at v$pkg; after this release run:"
+          echo "  tools/refresh-pkgbuild.sh ${{ inputs.tag || github.ref_name }}"
+
       - name: Install Rust (pinned, matches CI)
         uses: dtolnay/rust-toolchain@1.96.1
 

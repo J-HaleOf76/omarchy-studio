@@ -19,7 +19,7 @@ o m a r c h y
 
 ![Tour: themes with live preview, wallpaper browser, theme wizard, integrations, power, doctor](docs/assets/tour.gif)
 
-> **Status: alpha.** The modules below are built, tested (263 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
+> **Status: alpha.** The modules below are built, tested (264 tests green), and drive the real Omarchy config on disk — v0.1 through v0.6 of the roadmap are complete, v0.7 (community asks) shipped its headline features, and v0.8 (configurator parity+) is complete. Tested against Omarchy 3.8 / Hyprland 0.55.
 
 ## Contents
 - [Why](#why)
@@ -256,7 +256,8 @@ omarchy-studio hooks install | remove | status
 omarchy-studio update [--check]
 
 # Health check (--quiet: terse drift report, exit 1 when something needs a look)
-omarchy-studio doctor [--deps] [--quiet]
+omarchy-studio doctor [--deps] [--quiet]  # warns when Omarchy is a major version we haven't tested
+omarchy-studio --help | <command> --help  # the command list, and each command's usage
 ```
 
 </details>

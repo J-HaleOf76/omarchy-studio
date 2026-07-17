@@ -22,3 +22,5 @@ ratatui = { workspace = true }
 image = { workspace = true }
 ratatui-image = { workspace = true }
 serde_json = { workspace = true }   # hyprctl monitors -j (wallhaven `atleast`)
+clap = { workspace = true }         # dispatch, --help/--version (v1.0)
+libc = { workspace = true }         # SIGPIPE default (v1.0)

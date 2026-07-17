@@ -111,8 +111,9 @@ Competitive milestone; full architecture in [docs/handoff-v0.8.md](docs/handoff-
 - [ ] 1.0.2 Theme export/share + gh flow [04 §8] *(partly superseded by 0.9.6 rice bundle — rescope at v1.0 start)*
 - [ ] 1.0.3 Template coverage manager + starter templates [04 §3]
 - [ ] 1.0.4 Elephant provider + first-run wizard + uninstall [02 §3.2, 10 §3–4]
-- [ ] 1.0.5 Walker styling (M8) [05 §8]
+- [~] 1.0.5 Walker styling (M8) [05 §8] — **cut**: Omarchy 4 replaces Walker (with Waybar/Mako/Swayosd) by omarchy-shell, so this would ship with an expiry date. Effort moves to the v4 adapter track
 - [ ] 1.0.6 tmux e2e journeys + screenshot grid in CI [09 §4]
+- [x] 1.0.0 CLI front door: clap owns the group list, `--help`/`-h`/`help <group>`/`--version` and did-you-mean suggestions (leaf args still parsed per group); no-tty launch prints usage instead of panicking out of ratatui; SIGPIPE restored to the Unix default so `… | head` exits 141 quietly; AUR pkgver/sha256 refreshed off the real tag by `tools/refresh-pkgbuild.sh` + release-time guard; Doctor warns on an untested Omarchy major (`studio_core::version_fit`)
 - [ ] 1.0.7 Docs (quickstart, what-file-did-that-touch, tutorial) + AUR PKGBUILDs [10]
 - [ ] 1.0.8 Manual test protocol run on reference machine [09 §6]
 

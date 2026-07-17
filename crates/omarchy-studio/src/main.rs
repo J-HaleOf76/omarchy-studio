@@ -1,29 +1,204 @@
 //! omarchy-studio — TUI + CLI frontends over `studio-core`.
 //!
 //! Dispatch (spec 08): no args → TUI; subcommand → headless CLI.
-//! Hand-rolled dispatch for now; clap arrives when the tree grows (v0.2).
+//!
+//! clap owns the outer shell — the group list, `--help`/`-h`/`help <group>`,
+//! `--version`, unknown-command errors and their did-you-mean suggestions.
+//! Each group still parses its own leaf arguments in [`dispatch`]: the groups
+//! long predate clap here, and porting their `match` arms wholesale would
+//! risk behaviour nobody asked to change. What clap gives is a place for
+//! every group to document itself, which is what a user typing `--help`
+//! actually wants.
 
 mod tui;
 
+use clap::{Arg, Command};
 use studio_core::cmd::{CommandRunner, RealRunner};
 use studio_core::deps::{probe_all, DepStatus, Registry};
 use studio_core::modules::themes::{slugify, ThemeOrigin, ThemeStore};
 use studio_core::omarchy::{cmds, Capabilities, OmarchyPaths};
 use studio_core::snapshot::{SnapshotKind, SnapshotStore};
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let code = match argv.as_slice() {
-        [] => tui::run(),
-        ["--version" | "-V"] => {
-            println!(
-                "omarchy-studio {} (tested against omarchy {})",
+/// One verb group: a one-line summary for the group list, and its real usage
+/// for `<group> --help`. `args` swallows the rest verbatim for [`dispatch`].
+fn group(name: &'static str, about: &'static str, usage: &'static str) -> Command {
+    Command::new(name).about(about).after_help(usage).arg(
+        Arg::new("args")
+            .value_name("ARGS")
+            .num_args(0..)
+            .allow_hyphen_values(true)
+            .trailing_var_arg(true),
+    )
+}
+
+fn cli() -> Command {
+    Command::new("omarchy-studio")
+        .version(studio_core::VERSION)
+        // clap wants a 'static str and both halves are consts from two
+        // different crates, so `concat!` can't reach them — leak the one
+        // string this process will ever need.
+        .long_version(&*Box::leak(
+            format!(
+                "{} (tested against omarchy {})",
                 studio_core::VERSION,
                 studio_core::TESTED_OMARCHY
-            );
-            0
+            )
+            .into_boxed_str(),
+        ))
+        .about("One-stop theming cockpit for Omarchy — themes, keybinds, bar, notifications, and the rest")
+        .long_about(
+            "One-stop theming cockpit for Omarchy.\n\n\
+             Run with no arguments for the TUI, or use a command below to do the same\n\
+             work headlessly. Every change is snapshotted: `snapshot undo` reverses the\n\
+             last one, and a change that breaks a reload rolls itself back.",
+        )
+        .subcommand_required(false)
+        .arg_required_else_help(false)
+        .subcommand(group("doctor", "Check the install, capabilities and update survival", "usage: omarchy-studio doctor [--deps] [--quiet]"))
+        .subcommand(group("theme", "List, apply, fork, extract and install themes",
+            "usage:\n  \
+             theme list | current | apply <name> | fork <src> <new>\n  \
+             theme new <name> --from-image <path> [--mode normal|muted|material] [--bias auto|dark|light] [--apply]\n  \
+             theme new [name] --from-current-wallpaper [--apply]\n  \
+             theme extract <image> [normal|muted|material] [auto|dark|light]\n  \
+             theme community list | search <q> | install <name|owner/repo|url>\n  \
+             theme keybind install [MODS KEY] | remove | show"))
+        .subcommand(group("wallpaper", "Set wallpapers and search wallhaven",
+            "usage:\n  \
+             wallpaper list | current | set <n|name|path> | next | add <file>\n  \
+             wallpaper wallhaven search <query> [--color <hex>] [--ratio 16x9] [--page N]"))
+        .subcommand(group("keybind", "Export the effective keymap", "usage: omarchy-studio keybind cheatsheet [--out keymap.html]"))
+        .subcommand(group("snapshot", "Browse, diff and roll back every change Studio made",
+            "usage:\n  \
+             snapshot log | list\n  \
+             snapshot show <id>\n  \
+             snapshot restore <id> [--files <path>…]\n  \
+             snapshot undo"))
+        .subcommand(group("rice", "Bundle a whole setup and replay it on another machine",
+            "usage:\n  \
+             rice export [--out file.tar.gz]\n  \
+             rice show <file.tar.gz>\n  \
+             rice import <file.tar.gz> [--only mods] [--themes] [--with-monitors] [--dry-run]"))
+        .subcommand(group("themesync", "Keep other tools' colours following the active theme",
+            "usage: omarchy-studio themesync list | enable <tool> | disable <tool> | apply"))
+        .subcommand(group("looknfeel", "Hyprland window, layout, decoration and input settings",
+            "usage: omarchy-studio looknfeel list | get <key> | set <key> <value>"))
+        .subcommand(group("preset", "Look & Feel presets", "usage: omarchy-studio preset list | try <name> | apply <name>"))
+        .subcommand(group("toggle", "Flip a named Look & Feel toggle", "usage: omarchy-studio toggle <name>"))
+        .subcommand(group("animations", "Hyprland animation presets", "usage: omarchy-studio animations list | current | apply <name>"))
+        .subcommand(group("waybar", "Bar modules, settings and styling",
+            "usage:\n  \
+             waybar modules\n  \
+             waybar add <lane> <id> | remove <lane> <id> | move <id> <lane>\n  \
+             waybar set <path> <value>\n  \
+             waybar new <name> --exec <cmd> [--interval N] [--format F]\n  \
+             waybar style show | font-size <n> | radius <n> | reset"))
+        .subcommand(group("notif", "Mako notification behaviour and rules",
+            "usage:\n  \
+             notif list | get <key> | set <key> <value>\n  \
+             notif rule add <crit> <action> | rule remove <n>\n  \
+             notif dnd on|off|status | test low|normal|critical"))
+        .subcommand(group("osd", "Swayosd on-screen display",
+            "usage:\n  \
+             osd show | test\n  \
+             osd set show-percentage <on|off> | max-volume <n> | top-margin <f>"))
+        .subcommand(group("idle", "Idle timeline (screensaver, lock, screen-off, suspend)",
+            "usage:\n  \
+             idle timeline\n  \
+             idle set <screensaver|lock|screen-off|suspend> <seconds>"))
+        .subcommand(group("lock", "Lock screen appearance", "usage: omarchy-studio lock show | avatar <path> | avatar list | size <px> | blur <n>"))
+        .subcommand(group("monitor", "Displays: layout, scale, primary, identify",
+            "usage:\n  \
+             monitor list | identify\n  \
+             monitor primary <name> | scale <name> <factor> [--dry-run]\n  \
+             monitor apply [--dry-run]"))
+        .subcommand(group("apps", "Remove apps and webapps safely, with a cascade preview",
+            "usage:\n  \
+             apps list [--installed] [--all]\n  \
+             apps remove <id…> [--dry-run] [--yes]\n  \
+             apps restore <id> | leftovers"))
+        .subcommand(group("tweak", "One-line desktop tweaks", "usage: omarchy-studio tweak list | <id> on|off"))
+        .subcommand(group("power", "Power profiles and AC/battery switching",
+            "usage:\n  \
+             power profile list | get | set <name> [--persist]\n  \
+             power auto <ac> <bat> [--yes]"))
+        .subcommand(group("battery", "Battery status and charge limits", "usage: omarchy-studio battery [status] | limit <start> <stop> [--persist]"))
+        .subcommand(group("target", "Point Studio at configs outside the default paths",
+            "usage: omarchy-studio target list | set <key> <path> | reset <key>"))
+        .subcommand(group("nova", "Nice Launcher: config, keybind, install", "usage: omarchy-studio nova show | set <key> <value> | keybind [MODS KEY] | install | uninstall | launch"))
+        .subcommand(group("hooks", "Studio's theme-set and post-update hooks", "usage: omarchy-studio hooks install | remove | status"))
+        .subcommand(group("update", "Update Studio itself", "usage: omarchy-studio update [--check]"))
+        .subcommand(group("install-integration", "Add Studio to the Omarchy menu", "usage: omarchy-studio install-integration"))
+        .subcommand(group("uninstall", "Remove Studio's hooks, menu entry and managed blocks", "usage: omarchy-studio uninstall"))
+        // Dispatched by the Omarchy hook runner, not by people.
+        .subcommand(group("hook", "Internal: run a Studio hook event", "usage: omarchy-studio hook <event>").hide(true))
+}
+
+/// Rust ignores SIGPIPE at startup, which turns `studio theme list | head`
+/// into a panic on the first write past the closed pipe. Restore the Unix
+/// default so we die quietly mid-sentence, like every other CLI.
+fn restore_sigpipe() {
+    // SAFETY: setting a signal disposition to the OS default, before any
+    // thread exists — no handler state to race with.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+fn main() {
+    restore_sigpipe();
+    let matches = match cli().try_get_matches() {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = e.print();
+            std::process::exit(e.exit_code());
         }
+    };
+    let code = match matches.subcommand() {
+        // No command: the TUI, when there's a terminal to draw on.
+        None => run_tui(),
+        Some((name, sub)) => {
+            let rest: Vec<&str> = sub
+                .get_many::<String>("args")
+                .map(|v| v.map(String::as_str).collect())
+                .unwrap_or_default();
+            // `<group> --help` — the trailing args swallow it, so honour it here.
+            if rest.first().is_some_and(|a| *a == "--help" || *a == "-h") {
+                print_group_help(name);
+                0
+            } else {
+                let mut argv: Vec<&str> = vec![name];
+                argv.extend(rest);
+                dispatch(&argv)
+            }
+        }
+    };
+    std::process::exit(code);
+}
+
+/// The TUI needs a terminal. Without one — piped, cron, `ssh` with no tty —
+/// say so and show the command list instead of panicking out of ratatui.
+fn run_tui() -> i32 {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
+        eprintln!("omarchy-studio needs a terminal to draw the TUI.");
+        eprintln!("Run it in one, or use a command below to work headlessly.\n");
+        let _ = cli().print_help();
+        println!();
+        return 2;
+    }
+    tui::run()
+}
+
+fn print_group_help(name: &str) {
+    if let Some(mut c) = cli().find_subcommand(name).cloned() {
+        let _ = c.print_help();
+        println!();
+    }
+}
+
+fn dispatch(argv: &[&str]) -> i32 {
+    match argv {
         ["doctor", rest @ ..] => doctor(rest.contains(&"--deps"), rest.contains(&"--quiet")),
         ["hooks", rest @ ..] => hooks_cmd(rest),
         ["hook", rest @ ..] => hook_event(rest),
@@ -52,12 +227,14 @@ fn main() {
         ["rice", rest @ ..] => rice(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
-        [other, ..] => {
-            eprintln!("unknown command `{other}` — see `omarchy-studio` for the list");
+        // clap rejects unknown groups before we get here; a known group with
+        // stray arguments lands on its own usage text instead.
+        [name, ..] => {
+            print_group_help(name);
             2
         }
-    };
-    std::process::exit(code);
+        [] => 2,
+    }
 }
 
 fn omarchy() -> Option<OmarchyPaths> {
@@ -110,10 +287,21 @@ fn doctor(with_deps: bool, quiet: bool) -> i32 {
 
     let mark = |b: bool| if b { "yes" } else { "NO" };
     println!("omarchy-studio doctor");
+    let fit = studio_core::version_fit(&caps.omarchy_version);
     println!(
-        "  omarchy         {} at {}",
-        caps.omarchy_version,
-        paths.system.display()
+        "  omarchy         {} at {}{}",
+        if caps.omarchy_version.is_empty() {
+            "unknown"
+        } else {
+            &caps.omarchy_version
+        },
+        paths.system.display(),
+        match fit {
+            studio_core::VersionFit::Tested => "",
+            studio_core::VersionFit::Newer => "  (newer than tested — expected to work)",
+            studio_core::VersionFit::Major => "  ⚠ untested major version",
+            studio_core::VersionFit::Unknown => "",
+        },
     );
     println!(
         "  hyprland        {}",
@@ -145,6 +333,12 @@ fn doctor(with_deps: bool, quiet: bool) -> i32 {
         "    video wallpapers (mpvpaper)                  {}",
         mark(caps.video_wallpapers)
     );
+
+    // An untested Omarchy is a warning, never a refusal — see `version_fit`.
+    if let Some(w) = fit.warning() {
+        println!();
+        println!("  ⚠ {w}");
+    }
 
     if caps.omarchy_dirty {
         println!();
