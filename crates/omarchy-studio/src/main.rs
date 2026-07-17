@@ -49,6 +49,7 @@ fn main() {
         ["tweak", rest @ ..] => tweak(rest),
         ["power", rest @ ..] => power(rest),
         ["themesync", rest @ ..] => themesync(rest),
+        ["rice", rest @ ..] => rice(rest),
         ["install-integration"] => install_integration(),
         ["uninstall"] => uninstall(),
         [other, ..] => {
@@ -2883,6 +2884,226 @@ fn target(args: &[&str]) -> i32 {
         _ => {
             eprintln!("usage: target list | set <key> <path> | reset <key>");
             2
+        }
+    }
+}
+
+// ── rice ────────────────────────────────────────────────────────────────────
+
+/// `rice export|show|import` (ROADMAP 0.9.6). Import defaults to the cautious
+/// reading of every ambiguity: no machine-specific files, no theme
+/// overwrites, and `--dry-run` available for all of it.
+fn rice(args: &[&str]) -> i32 {
+    use studio_core::modules::rice::{self, ImportFilter};
+
+    let Some(paths) = omarchy() else { return 4 };
+    let home = match rice::home() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("{}", brief(e));
+            return 1;
+        }
+    };
+    let store = match history() {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+
+    match args {
+        ["export", rest @ ..] => {
+            let out = match rest {
+                [] => home.join(format!(
+                    "omarchy-rice-{}.tar.gz",
+                    paths.current_theme_name().unwrap_or_else(|_| "rice".into())
+                )),
+                ["--out", p] => expand_user(p),
+                _ => {
+                    eprintln!("usage: omarchy-studio rice export [--out file.tar.gz]");
+                    return 2;
+                }
+            };
+            match rice::export(&store, &paths, &home, &out, &RealRunner) {
+                Ok(b) => {
+                    println!("wrote {}", out.display());
+                    println!(
+                        "  {} config file(s) across {}",
+                        b.entries.len(),
+                        b.modules().join(", ")
+                    );
+                    println!("  {} theme(s): {}", b.themes.len(), b.themes.join(", "));
+                    println!(
+                        "  omarchy {} · studio {}",
+                        b.omarchy_version, b.studio_version
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("export failed: {}", brief(e));
+                    1
+                }
+            }
+        }
+        ["show", file] => {
+            let tmp = unpack_tmp();
+            let r = match rice::unpack(&expand_user(file), &tmp, &RealRunner) {
+                Ok(b) => {
+                    println!(
+                        "rice bundle · format {} · omarchy {} · studio {} · {}",
+                        b.format, b.omarchy_version, b.studio_version, b.created
+                    );
+                    println!();
+                    for e in &b.entries {
+                        let tag = if e.machine {
+                            "  [this machine only]"
+                        } else {
+                            ""
+                        };
+                        println!("  {:<10} {}{tag}", e.module, e.home_rel);
+                    }
+                    println!();
+                    println!("  themes: {}", b.themes.join(", "));
+                    0
+                }
+                Err(e) => {
+                    eprintln!("{}", brief(e));
+                    1
+                }
+            };
+            let _ = std::fs::remove_dir_all(&tmp);
+            r
+        }
+        ["import", file, flags @ ..] => {
+            let mut filter = ImportFilter::default();
+            let mut dry = false;
+            let mut i = 0;
+            while i < flags.len() {
+                match flags[i] {
+                    "--dry-run" => dry = true,
+                    "--with-monitors" => filter.with_machine = true,
+                    "--themes" => filter.themes = true,
+                    "--only" => {
+                        i += 1;
+                        match flags.get(i) {
+                            Some(list) => {
+                                filter.only =
+                                    list.split(',').map(|s| s.trim().to_string()).collect()
+                            }
+                            None => {
+                                eprintln!("--only needs a module list, e.g. --only waybar,mako");
+                                return 2;
+                            }
+                        }
+                    }
+                    other => {
+                        eprintln!("unknown flag `{other}` — see `omarchy-studio rice`");
+                        return 2;
+                    }
+                }
+                i += 1;
+            }
+
+            let tmp = unpack_tmp();
+            let code = rice_import(
+                &expand_user(file),
+                &tmp,
+                &paths,
+                &home,
+                &store,
+                &filter,
+                dry,
+            );
+            let _ = std::fs::remove_dir_all(&tmp);
+            code
+        }
+        _ => {
+            println!("usage:");
+            println!("  omarchy-studio rice export [--out file.tar.gz]");
+            println!("  omarchy-studio rice show <file.tar.gz>");
+            println!(
+                "  omarchy-studio rice import <file.tar.gz> [--only mods] [--themes] \
+                 [--with-monitors] [--dry-run]"
+            );
+            println!();
+            println!("a bundle carries every config file Studio wrote, plus your own themes;");
+            println!("import replays each one through the snapshot-backed apply pipeline.");
+            2
+        }
+    }
+}
+
+fn unpack_tmp() -> std::path::PathBuf {
+    studio_core::studio_cache_dir().join(format!("rice-import-{}", std::process::id()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rice_import(
+    file: &std::path::Path,
+    tmp: &std::path::Path,
+    paths: &OmarchyPaths,
+    home: &std::path::Path,
+    store: &SnapshotStore,
+    filter: &studio_core::modules::rice::ImportFilter,
+    dry: bool,
+) -> i32 {
+    use studio_core::modules::rice;
+
+    let b = match rice::unpack(file, tmp, &RealRunner) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{}", brief(e));
+            return 1;
+        }
+    };
+    let plan = match rice::plan_import(&b, tmp, paths, home, filter) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", brief(e));
+            return 1;
+        }
+    };
+
+    if let Some(m) = &plan.omarchy_mismatch {
+        println!("note: {m} — importing anyway, verification still applies");
+    }
+    for (f, why) in &plan.skipped {
+        println!("skip  {f}  ({why})");
+    }
+    for f in &plan.unchanged {
+        println!("same  {f}");
+    }
+    for e in &plan.edits {
+        println!("write {}", e.file.display());
+    }
+    for t in &plan.themes_new {
+        println!("theme {t}  (new)");
+    }
+    for t in &plan.themes_existing {
+        println!("theme {t}  (already installed — left as it is)");
+    }
+    if plan.edits.is_empty() && plan.themes_new.is_empty() {
+        println!("\nnothing to import — this machine already matches the bundle");
+        return 0;
+    }
+
+    match rice::import(&plan, paths, tmp, store, &RealRunner, dry) {
+        Ok(r) if r.dry_run => {
+            println!("\ndry run — nothing was written");
+            0
+        }
+        Ok(r) => {
+            println!("\nimported. snapshot {}", r.pre);
+            if !r.drifted.is_empty() {
+                println!("hand-edits were snapshotted first:");
+                for f in &r.drifted {
+                    println!("  {}", f.display());
+                }
+            }
+            println!("undo it all with `omarchy-studio snapshot undo`");
+            0
+        }
+        Err(e) => {
+            eprintln!("import failed (rolled back): {}", brief(e));
+            1
         }
     }
 }

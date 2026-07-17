@@ -168,15 +168,25 @@ impl SnapshotStore {
 
     /// Every file the store has ever tracked, per its manifest.
     pub fn tracked_files(&self) -> Vec<PathBuf> {
+        self.tracked().into_iter().map(|(f, _)| f).collect()
+    }
+
+    /// Every tracked file with the module that wrote it — the attribution
+    /// the manifest has carried all along, for callers that group by module
+    /// (the rice bundle) rather than just listing paths.
+    pub fn tracked(&self) -> Vec<(PathBuf, String)> {
         let Ok(content) = std::fs::read_to_string(self.root.join("manifest.toml")) else {
             return Vec::new();
         };
         content
             .lines()
             .filter_map(|l| {
-                let (k, _) = l.split_once('=')?;
+                let (k, v) = l.split_once('=')?;
                 let k = k.trim().trim_matches('"');
-                k.starts_with('/').then(|| PathBuf::from(k))
+                if !k.starts_with('/') {
+                    return None;
+                }
+                Some((PathBuf::from(k), v.trim().trim_matches('"').to_string()))
             })
             .collect()
     }

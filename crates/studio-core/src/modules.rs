@@ -31,6 +31,7 @@ pub mod mako;
 pub mod monitors;
 pub mod nova;
 pub mod power;
+pub mod rice;
 pub mod swayosd;
 pub mod targets;
 pub mod themes;

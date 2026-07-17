@@ -7,6 +7,7 @@
 | | A La Carchy | Omarchy Studio |
 |---|---|---|
 | Form | one 10.8k-line bash script, run via `curl \| bash` | Rust workspace: engine crate + TUI/CLI binary, versioned releases |
+| Rice migration | tar.gz backup/restore of 8 config dirs, blind untar | — | `rice export`/`import`: bundle scoped to what Studio actually wrote, **imported by replaying every file through the apply pipeline** (snapshot, verify, rollback) with a dry-run plan, machine-specific files held back (0.9.6) |
 | Undo | timestamped `.tar.gz` of 8 config dirs + restore script | git-backed snapshot store: every change pre/post-committed, `snapshot undo`, automatic rollback when a change breaks a reload — **plus a browsable timeline** (`snapshot log`/`show`, or the Snapshots screen) with a colored diff of every change and whole-tree restore to any point, itself recorded |
 | Apply safety | confirmation prompts (bypassable via "Apply all") | apply pipeline: drift-check → snapshot → hash-guarded write → reload → **verify → rollback on failure**; Waybar crash-watchdog auto-reverts a config that kills the bar |
 | Survives `omarchy-update` | mostly — but two features edit vendored files under `~/.local/share/omarchy/default/`, which updates silently revert | always — Studio never writes into Omarchy's vendored tree; every change is a user-side override or managed block |

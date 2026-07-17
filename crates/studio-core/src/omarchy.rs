@@ -67,6 +67,15 @@ impl OmarchyPaths {
     pub fn current_colors(&self) -> PathBuf {
         self.config.join("current/theme/colors.toml")
     }
+
+    /// Omarchy's own version, from the `version` file it ships. Empty when
+    /// it can't be read — callers warn, never block, since an unknown
+    /// version is exactly the case where guessing hurts.
+    pub fn omarchy_version(&self) -> String {
+        std::fs::read_to_string(self.system.join("version"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    }
 }
 
 /// Capability probe result (spec 02 §5).
@@ -100,9 +109,7 @@ pub struct Capabilities {
 
 impl Capabilities {
     pub fn probe(paths: &OmarchyPaths, runner: &dyn CommandRunner) -> Self {
-        let omarchy_version = std::fs::read_to_string(paths.system.join("version"))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+        let omarchy_version = paths.omarchy_version();
 
         let hyprland_version = runner
             .run(&Cmd::new("hyprctl").arg("version"))
