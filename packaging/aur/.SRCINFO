@@ -1,13 +1,13 @@
 pkgbase = omarchy-studio
 	pkgdesc = One-stop theming cockpit for Omarchy — themes, keybinds, waybar, notifications, lock/idle (TUI + CLI)
-	pkgver = 0.8.7
+	pkgver = 0.9.0
 	pkgrel = 1
 	url = https://github.com/arino08/omarchy-studio
 	arch = x86_64
 	license = MIT
 	makedepends = cargo
 	depends = gcc-libs
-	source = omarchy-studio-0.8.7.tar.gz::https://github.com/arino08/omarchy-studio/archive/refs/tags/v0.8.7.tar.gz
-	sha256sums = 59afb3515025019fe831639cbb282f0f15cf08a23054799e5f6132529c17577f
+	source = omarchy-studio-0.9.0.tar.gz::https://github.com/arino08/omarchy-studio/archive/refs/tags/v0.9.0.tar.gz
+	sha256sums = 0fbec264389d0269a736fb21b8efb4dead728798ff1c8f1db8e2d31a277ef347
 
 pkgname = omarchy-studio

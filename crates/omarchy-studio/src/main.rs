@@ -33,6 +33,10 @@ fn group(name: &'static str, about: &'static str, usage: &'static str) -> Comman
 
 fn cli() -> Command {
     Command::new("omarchy-studio")
+        // Help text names the command, not argv[0] — the release asset is
+        // downloaded as `omarchy-studio-linux-x86_64`, and telling someone
+        // to run *that* is wrong the moment they install it.
+        .bin_name("omarchy-studio")
         .version(studio_core::VERSION)
         // clap wants a 'static str and both halves are consts from two
         // different crates, so `concat!` can't reach them — leak the one
