@@ -6,7 +6,7 @@ members = ["crates/studio-core", "crates/omarchy-studio"]
 # Must match the next release tag — release.yml refuses a tag that disagrees
 # (the binary bakes this in as CARGO_PKG_VERSION; a stale value makes the
 # self-updater loop forever on "newer" releases).
-version = "0.8.8"
+version = "0.9.0"
 edition = "2021"
 license = "MIT"
 authors = ["Ariz <arinopc22@gmail.com>"]
@@ -17,7 +17,7 @@ keywords = ["omarchy", "hyprland", "theming", "tui", "config"]
 categories = ["command-line-utilities", "config"]
 
 [workspace.dependencies]
-studio-core = { path = "crates/studio-core", version = "0.8.8" }
+studio-core = { path = "crates/studio-core", version = "0.9.0" }
 toml_edit = "0.22"          # lossless TOML (colors.toml, walker/swayosd configs)
 ratatui = "0.29"            # TUI framework (crossterm re-exported via ratatui::crossterm)
 serde = { version = "1", features = ["derive"] }  # hyprctl -j, wallhaven API
@@ -31,3 +31,13 @@ libc = "0.2"                # restore default SIGPIPE so piping to `head` exits 
 # serde / serde_json = "1"  # hyprctl -j, wallhaven API (v0.1)
 # thiserror = "2"           # error taxonomy (v0.1)
 # jsonc-parser = "0.26"     # waybar config CST (v0.4)
+
+# Every user downloads this binary (release asset, curl installer, AUR), so
+# it's worth the slower build: 8.7 MB → 6.5 MB. `strip = "debuginfo"` rather
+# than "symbols" — the same size to within 0.1 MB, but panics still name
+# their frames, and bug reports are the only debugger we get. `panic` stays
+# at unwind: the TUI restores the terminal from a panic hook.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "debuginfo"

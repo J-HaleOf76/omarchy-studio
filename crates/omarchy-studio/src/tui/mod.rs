@@ -2452,6 +2452,31 @@ fn monitor_atleast() -> Option<String> {
 
 /// Entry point: no-args launch (spec 08). Runs until quit; restores the
 /// terminal on any exit path.
+/// Put the terminal back before a panic prints.
+///
+/// The teardown below only runs on the way out of the loop, so a panic used
+/// to leave raw mode on, the alternate screen up and mouse reporting live —
+/// the user's next shell echoes nothing and spews escape codes, and the
+/// panic message itself is drawn into a screen that's about to vanish. The
+/// hook restores first, then lets the default handler print somewhere the
+/// message survives.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::DisableMouseCapture
+        );
+        ratatui::restore();
+        eprintln!(
+            "omarchy-studio hit a bug and stopped. Your config is untouched — \
+             every change it makes is snapshotted first.\n\
+             Please report this at https://github.com/arino08/omarchy-studio/issues\n"
+        );
+        previous(info);
+    }));
+}
+
 pub fn run() -> i32 {
     let paths = match OmarchyPaths::discover() {
         Ok(p) if p.installed() => p,
@@ -2468,6 +2493,7 @@ pub fn run() -> i32 {
         }
     };
 
+    install_panic_hook();
     let mut terminal = ratatui::init();
     // Enable Kitty keyboard flags where supported, so chord capture can see
     // SUPER and disambiguate modifiers. No-op on terminals that lack it.
