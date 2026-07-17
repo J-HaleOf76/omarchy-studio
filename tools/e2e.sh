@@ -73,6 +73,19 @@ tmux new-session -d -s "$SESSION" -x 110 -y 32 \
          XDG_CACHE_HOME='$HOME_DIR/.cache' '$BIN'"
 sleep 3
 
+# ── first-run on-ramp: a fresh fixture (no `onboarded` marker, integration
+# off) opens on the welcome card, which owns input until dismissed. Anchor on
+# its own title, not the rail's `✦ Studio`, which shows behind it either way.
+check "first run shows the welcome on-ramp" '✦ Welcome to Studio'
+check "the on-ramp lists a set-up step" 'Wire into Omarchy'
+# It owns the keys: Down moves the card's own selection onto the next step
+# (proving the rail didn't get the key), which then reads "enter to install".
+tmux send-keys -t "$SESSION" Down; sleep 0.6
+check "the on-ramp captures navigation" 'enter to install'
+# Dismiss it; we land on the rail and (marker now written) it won't return.
+tmux send-keys -t "$SESSION" d; sleep 1
+check_gone "d dismisses the on-ramp" '✦ Welcome to Studio'
+
 # It starts at all, draws its chrome, and reads the fixture — not a built-in
 # default: `Nord` exists only because the fixture created it.
 check "starts and draws the rail" '✦ Studio'

@@ -23,6 +23,7 @@ mod screens {
     pub mod monitors;
     pub mod notifications;
     pub mod nova;
+    pub mod onboarding;
     pub mod palette_editor;
     pub mod snapshots;
     pub mod themes;
@@ -58,6 +59,7 @@ use screens::looknfeel::{LookFeelAction, LookFeelScreen};
 use screens::monitors::{MonitorsAction, MonitorsScreen};
 use screens::notifications::{NotifAction, NotificationsScreen};
 use screens::nova::{NovaAction, NovaScreen};
+use screens::onboarding::{self, OnboardingAction, OnboardingScreen};
 use screens::palette_editor::{EditorAction, PaletteEditor};
 use screens::snapshots::{SnapshotsAction, SnapshotsScreen};
 use screens::themes::{ThemeAction, ThemesScreen};
@@ -168,6 +170,8 @@ struct App {
     wallpapers: WallpapersScreen,
     /// Shared terminal-graphics preview cell (probed once at startup).
     images: imagecell::ImageCell,
+    /// First-run on-ramp, shown once over everything on a fresh Studio.
+    onboarding: Option<OnboardingScreen>,
     /// Theme-from-wallpaper wizard, when open (modal over everything).
     wizard: Option<WizardScreen>,
     /// wallhaven browser, when open (modal; wizard can stack on top via `t`).
@@ -253,6 +257,10 @@ impl App {
         } else {
             None
         };
+        // A fresh Studio (never onboarded, still something to set up) opens
+        // onto the welcome on-ramp instead of straight into the rail.
+        let ob_status = onboarding_status(&paths);
+        let onboarding = should_onboard(&ob_status).then(|| OnboardingScreen::new(ob_status));
         Self {
             paths,
             skin,
@@ -276,6 +284,7 @@ impl App {
             integrations,
             wallpapers,
             images,
+            onboarding,
             wizard: None,
             wallhaven: None,
             community: None,
@@ -382,8 +391,77 @@ impl App {
         }
     }
 
+    /// Perform a first-run step, then refresh the on-ramp's status and toast
+    /// the result. Steps are additive and each has a CLI twin, so a failure
+    /// here just leaves that row un-ticked — nothing half-applied to roll back.
+    fn onboard_run(&mut self, step: onboarding::Step) {
+        use onboarding::Step;
+        let outcome: Result<String, String> = match step {
+            Step::History => match crate::history() {
+                Ok(_) => Ok("Change history started — every edit is now snapshotted".into()),
+                Err(_) => Err("couldn't start the history repo".into()),
+            },
+            Step::Integration => self.onboard_integration(),
+            Step::ThemeSync => self.onboard_themesync(),
+        };
+        self.toast = Some(match outcome {
+            Ok(text) => Toast { text, ok: true },
+            Err(text) => Toast { text, ok: false },
+        });
+        if let Some(w) = self.onboarding.as_mut() {
+            w.set_status(onboarding_status(&self.paths));
+        }
+    }
+
+    fn onboard_integration(&mut self) -> Result<String, String> {
+        studio_core::integration::install_menu(&self.paths).map_err(|e| format!("{e:?}"))?;
+        let state = studio_core::studio_state_dir();
+        studio_core::hooks::install(&self.paths, &state).map_err(|e| format!("{e:?}"))?;
+        Ok("Wired into Omarchy — menu entry + theme/update hooks installed".into())
+    }
+
+    fn onboard_themesync(&mut self) -> Result<String, String> {
+        use studio_core::modules::themesync::{self, Enabled};
+        let config_toml = studio_core::studio_config_dir().join("config.toml");
+        let mut enabled = Enabled::load(&config_toml);
+        let mut on: Vec<&str> = Vec::new();
+        for tool in themesync::catalog() {
+            if tool.available() && matches!(enabled.set(tool.id, true), Ok(true)) {
+                on.push(tool.label);
+            }
+        }
+        if on.is_empty() {
+            // Nothing themable installed — don't write an empty sync config.
+            return Err("no themable tools found (install fzf or lazygit)".into());
+        }
+        enabled.save().map_err(|e| format!("{e:?}"))?;
+        crate::regen_themesync(&self.paths)?;
+        Ok(format!(
+            "Theme sync on for {} — open a new terminal",
+            on.join(", ")
+        ))
+    }
+
+    /// Dismiss the on-ramp and stamp first-run seen so it never nags again.
+    fn onboard_finish(&mut self) {
+        let _ = std::fs::create_dir_all(studio_core::studio_state_dir());
+        let _ = std::fs::write(onboarded_marker(), "");
+        self.onboarding = None;
+    }
+
     fn on_key(&mut self, key: KeyEvent) {
         self.toast = None;
+
+        // The first-run on-ramp is a startup gate: it owns every key until the
+        // user finishes or skips it, so it comes before any other overlay.
+        if let Some(w) = self.onboarding.as_mut() {
+            match w.handle(key) {
+                OnboardingAction::None => {}
+                OnboardingAction::Run(step) => self.onboard_run(step),
+                OnboardingAction::Finish => self.onboard_finish(),
+            }
+            return;
+        }
 
         // Overlays consume input first.
         if self.help {
@@ -2022,6 +2100,11 @@ impl App {
         if let Some(p) = &self.palette {
             p.render(f, &self.skin);
         }
+        // The on-ramp centers in the content pane, like the other modals; it
+        // still owns all input until dismissed (see on_key).
+        if let Some(w) = &self.onboarding {
+            w.render(f, cols[1], &self.skin);
+        }
     }
 
     fn draw_rail(&mut self, f: &mut Frame, area: Rect) {
@@ -2475,6 +2558,40 @@ fn install_panic_hook() {
         );
         previous(info);
     }));
+}
+
+/// Where the "first-run on-ramp already shown" stamp lives.
+fn onboarded_marker() -> std::path::PathBuf {
+    studio_core::studio_state_dir().join("onboarded")
+}
+
+/// Show the welcome on-ramp only when it hasn't been dismissed before and
+/// there's still something to set up. The history repo can't be the freshness
+/// signal — it's created eagerly the first time any screen opens the store —
+/// so a written marker (on finish/skip) plus "not already fully set up" is what
+/// keeps it a one-time thing without nagging someone who's all set.
+fn should_onboard(status: &onboarding::Status) -> bool {
+    !onboarded_marker().exists() && !status.all_done()
+}
+
+/// The live set-up status the on-ramp renders, read from disk.
+fn onboarding_status(paths: &OmarchyPaths) -> onboarding::Status {
+    let history = studio_core::studio_state_dir()
+        .join("history")
+        .join(".git")
+        .exists();
+    let integration =
+        studio_core::integration::is_installed(paths) && studio_core::hooks::installed(paths);
+    let themesync = !studio_core::modules::themesync::Enabled::load(
+        &studio_core::studio_config_dir().join("config.toml"),
+    )
+    .list()
+    .is_empty();
+    onboarding::Status {
+        history,
+        integration,
+        themesync,
+    }
 }
 
 pub fn run() -> i32 {
