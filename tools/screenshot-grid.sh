@@ -86,6 +86,19 @@ for i in "${!SCREENS[@]}"; do
     args+=("$file")
 done
 
+# SCREENS is a hand-kept copy of tui::Screen::ALL. A *removed* screen fails
+# above, but an added one would just never be visited. The rail wraps, so from
+# the last screen one more Down must land back on the first — if the rail grew
+# a screen we didn't list, we land on that instead.
+tmux send-keys -t "$SESSION" Down; sleep 1.2
+first="${SCREENS[0]}"
+if tmux capture-pane -p -t "$SESSION" | grep -qF -- "╮ $first"; then
+    echo "  ok    the rail wraps back to '$first' — no unlisted screens"
+else
+    echo "  FAIL  the rail has a screen past '${SCREENS[-1]}' — add it to SCREENS"
+    fails=$((fails + 1))
+fi
+
 tmux send-keys -t "$SESSION" q; sleep 1
 tmux kill-session -t "$SESSION" 2>/dev/null
 

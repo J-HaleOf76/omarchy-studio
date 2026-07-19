@@ -1855,6 +1855,16 @@ fn keybind_add(paths: &OmarchyPaths, chord: &str, dispatcher: &str, arg: &str) -
             return 2;
         }
     };
+    // Warn, don't block: Hyprland ships more dispatchers than our schema knows
+    // (plugins add their own), so refusing an unknown one would block valid
+    // binds. But a typo like `exce` silently writes config that never fires,
+    // and the TUI can't produce one because it picks from the schema.
+    if studio_core::modules::dispatchers::lookup(dispatcher).is_none() {
+        eprintln!(
+            "warning: '{dispatcher}' isn't a dispatcher Studio knows — binding it anyway.\n\
+             If that's a typo the chord will do nothing; check with `omarchy-studio keybind list`."
+        );
+    }
     let bind = ConfigBind {
         flags: "bind".into(),
         modmask: mask,
@@ -4031,11 +4041,14 @@ fn uninstall_themesync(paths: &OmarchyPaths) -> Result<Vec<std::path::PathBuf>, 
         return Ok(Vec::new());
     }
 
-    // apply() needs *a* palette to render with, but nothing is being written
-    // here, so a missing active theme must not block the uninstall.
+    // apply() needs *a* palette to render with, but with nothing enabled it
+    // renders nothing — it only deletes. So fall back to the empty palette
+    // rather than let a broken or half-removed theme block the uninstall and
+    // strand the ~/.bashrc block pointing at files we just deleted.
     let pal = Palette::load(&paths.current_colors())
+        .or_else(|_| Palette::parse(""))
         .map(|p| Pal::from_palette(&p))
-        .map_err(|e| format!("no active palette: {}", brief(e)))?;
+        .map_err(|e| format!("no usable palette: {}", brief(e)))?;
     themesync::apply(&dir, &bashrc, &pal, &[]).map_err(brief)
 }
 
