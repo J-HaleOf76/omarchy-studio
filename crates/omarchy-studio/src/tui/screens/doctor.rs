@@ -110,6 +110,22 @@ impl DoctorScreen {
             format!("{} at {}", self.caps.omarchy_version, self.system_path),
             skin,
         ));
+        // An Omarchy Studio hasn't been tested against is worth saying out
+        // loud here — this is the screen people open when something looks
+        // wrong. It's a warning, never a refusal (see `version_fit`), so it
+        // reads as context rather than an error.
+        if let Some(warning) = studio_core::version_fit(&self.caps.omarchy_version).warning() {
+            // Wrap by hand: Paragraph's own wrap restarts continuation lines at
+            // column zero, which breaks them out of this indented fact list.
+            let width = area.width.saturating_sub(8).max(20) as usize;
+            for (i, line) in wrap_words(&warning, width).into_iter().enumerate() {
+                let lead = if i == 0 { "    ! " } else { "      " };
+                lines.push(Line::from(vec![
+                    Span::styled(lead, skin.warn()),
+                    Span::styled(line, skin.warn()),
+                ]));
+            }
+        }
         let hypr = if self.caps.hyprland_version.is_empty() {
             "unavailable (not in a Hyprland session?)".into()
         } else {
@@ -196,5 +212,69 @@ impl DoctorScreen {
         )));
 
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+    }
+}
+
+/// Break `text` into lines of at most `width` columns, on word boundaries.
+///
+/// Only needed where a wrapped line has to keep an indent (see the version
+/// warning): everywhere else `Paragraph`'s own wrap is the right tool.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wraps_on_word_boundaries_within_the_width() {
+        let lines = wrap_words("the quick brown fox jumps", 11);
+        assert_eq!(lines, vec!["the quick", "brown fox", "jumps"]);
+        assert!(lines.iter().all(|l| l.chars().count() <= 11));
+    }
+
+    #[test]
+    fn a_word_longer_than_the_width_still_gets_its_own_line() {
+        // Better to overflow one line than to drop the word entirely.
+        assert_eq!(
+            wrap_words("hi supercalifragilistic", 5),
+            vec!["hi", "supercalifragilistic"]
+        );
+    }
+
+    #[test]
+    fn empty_text_produces_no_lines() {
+        assert!(wrap_words("   ", 10).is_empty());
+    }
+
+    #[test]
+    fn every_version_fit_warning_survives_wrapping_intact() {
+        // The warning is the whole point of the row — wrapping must not lose
+        // or reorder any of it.
+        for v in ["4.0.0", "banana", ""] {
+            let warning = studio_core::version_fit(v)
+                .warning()
+                .expect("untested version must warn");
+            let wrapped = wrap_words(&warning, 40).join(" ");
+            assert_eq!(
+                wrapped,
+                warning.split_whitespace().collect::<Vec<_>>().join(" ")
+            );
+        }
     }
 }

@@ -102,7 +102,7 @@ Competitive milestone; full architecture in [docs/handoff-v0.8.md](docs/handoff-
 
 ## Omarchy 4 readiness (continuous track)
 
-- [ ] O4.1 Omarchy version probe in the adapter; Doctor surfaces it, warns on unknown/major versions
+- [x] O4.1 Omarchy version probe in the adapter; Doctor surfaces it, warns on unknown/major versions: `studio_core::version_fit` compares the probed version against `TESTED_OMARCHY` and **warns, never blocks** — refusing to run on an untested version would make every Omarchy release a brick, and the snapshot store is the real safety net. The CLI (`doctor --deps`) already carried it; the TUI Doctor now shows the warning under the version row for a different major (v4!) or an unreadable version file, wrapped with a hanging indent so it stays inside the fact list
 - [ ] O4.2 Track the `omarchy-4` branch (omarchy-shell, two-package layout) at each milestone end; spike an omarchy-shell adapter when it stabilizes
 
 ## v1.0 — Polish (~2 wks) — *exit: a stranger installs from AUR and rices start-to-finish*
