@@ -26,7 +26,7 @@ Milestones from PRD §12, broken into issue-sized tasks. Order within a mileston
 - [x] 0.2.4 conflict detection + override writes: find_conflicts, ConfigBind render, Override model, write_overrides into user bindings.conf via ManagedBlock (idempotent, preserves user binds) [05 §3]
 - [x] 0.2.5 chord capture: KeyEvent -> Hyprland chord (modmask+key name), kitty keyboard enhancement flags pushed where supported for SUPER capture [05 §4]
 - [x] 0.2.6 Keybinds screen: effective keymap from hyprctl binds -j, human labels + source attribution, rebind via live chord capture + disable, snapshot-backed override writes with live reload [05]
-- [ ] 0.2.7 CLI `keybind add/remove/disable/reset/check/list` [08]
+- [x] 0.2.7 CLI `keybind add/remove/disable/reset/check/list` [08]: the CLI twin of the Keybinds screen, writing the same managed override block through the same snapshot pair, so a change made here is undoable exactly like one made in the TUI. `list` prints the effective keymap with the screen's own label rule (config description, else the dispatcher's plain-language name) and source attribution; `check` reports chords bound twice and **exits 1** so it works in a script; `add`/`disable` replace rather than stack a second line for the same chord; `remove` drops Studio's override for one chord (restoring whatever Omarchy binds underneath), `reset` drops them all. Chords parse as `SUPER+SHIFT+T` or `"SUPER SHIFT T"`, and **every modifier is validated** — `mods_to_mask` maps anything unknown to zero, so a typo like `SUPR+T` would otherwise silently bind a bare `T` over the real one
 - [ ] 0.2.8 Verify-rollback e2e with injected configerrors [09 §3]
 
 ## v0.3 — Look & Feel + Animations (~2 wks) — *exit: try→apply→undo presets; zero broken reloads*

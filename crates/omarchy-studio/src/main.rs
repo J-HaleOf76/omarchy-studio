@@ -71,7 +71,7 @@ fn cli() -> Command {
             "usage:\n  \
              wallpaper list | current | set <n|name|path> | next | add <file>\n  \
              wallpaper wallhaven search <query> [--color <hex>] [--ratio 16x9] [--page N]"))
-        .subcommand(group("keybind", "Export the effective keymap", "usage: omarchy-studio keybind cheatsheet [--out keymap.html]"))
+        .subcommand(group("keybind", "Inspect and change your keyboard shortcuts", "usage: omarchy-studio keybind list [--conflicts] | check | add <CHORD> <dispatcher> [args] | disable <CHORD> | remove <CHORD> | reset | cheatsheet [--out keymap.html]\n   CHORD looks like SUPER+SHIFT+T"))
         .subcommand(group("snapshot", "Browse, diff and roll back every change Studio made",
             "usage:\n  \
              snapshot log | list\n  \
@@ -1630,6 +1630,14 @@ fn keybind_cli(args: &[&str]) -> i32 {
     use studio_core::modules::themesync::Pal;
     let Some(paths) = omarchy() else { return 4 };
     match args {
+        ["list", rest @ ..] => keybind_list(&paths, rest),
+        ["check"] => keybind_check(&paths),
+        ["add", chord, dispatcher, arg @ ..] => {
+            keybind_add(&paths, chord, dispatcher, &arg.join(" "))
+        }
+        ["disable", chord] => keybind_disable(&paths, chord),
+        ["remove", chord] => keybind_remove(&paths, chord),
+        ["reset"] => keybind_reset(&paths),
         ["cheatsheet", rest @ ..] => {
             let binds = match keybinds::load_effective(&paths, &RealRunner) {
                 Ok(b) => b,
@@ -1671,10 +1679,259 @@ fn keybind_cli(args: &[&str]) -> i32 {
             }
         }
         _ => {
-            eprintln!("usage: omarchy-studio keybind cheatsheet [--out file.html]");
+            eprintln!("usage: omarchy-studio keybind list [--conflicts] | check |");
+            eprintln!("       add <CHORD> <dispatcher> [args] | disable <CHORD> |");
+            eprintln!("       remove <CHORD> | reset | cheatsheet [--out file.html]");
+            eprintln!("   CHORD looks like SUPER+SHIFT+T");
             2
         }
     }
+}
+
+/// Parse `SUPER+SHIFT+T` (or `"SUPER SHIFT T"`) into a modmask and key.
+///
+/// Every modifier is validated: `mods_to_mask` maps anything it doesn't know
+/// to zero, so a typo like `SUPR+T` would otherwise silently bind a bare `T`.
+fn parse_chord(text: &str) -> Result<(u16, String), String> {
+    use studio_core::modules::keybinds::mods_to_mask;
+    let tokens: Vec<&str> = text
+        .split(['+', ' ', ','])
+        .filter(|t| !t.is_empty())
+        .collect();
+    let Some((key, mods)) = tokens.split_last() else {
+        return Err(format!("'{text}' isn't a chord — try SUPER+SHIFT+T"));
+    };
+    let mut mask = 0u16;
+    for m in mods {
+        match mods_to_mask(m) {
+            0 => {
+                return Err(format!(
+                    "unknown modifier '{m}' — use SUPER, SHIFT, CTRL, ALT or CAPS"
+                ))
+            }
+            bit => mask |= bit,
+        }
+    }
+    Ok((mask, key.to_string()))
+}
+
+/// Print the effective keymap: what each chord does *now*, and who set it.
+fn keybind_list(paths: &OmarchyPaths, args: &[&str]) -> i32 {
+    use studio_core::modules::dispatchers::label_for;
+    use studio_core::modules::keybinds;
+    let only_conflicts = args.contains(&"--conflicts");
+    let binds = match keybinds::load_effective(paths, &RealRunner) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("couldn't read the effective keymap: {}", brief(e));
+            return 1;
+        }
+    };
+    if only_conflicts {
+        return keybind_check(paths);
+    }
+    for b in &binds {
+        let who = b
+            .source
+            .as_ref()
+            .map(|s| format!("{:?}", s.layer).to_lowercase())
+            // No source line matched — Hyprland knows it, no config declares it.
+            .unwrap_or_else(|| "plugin".into());
+        // Same label rule as the Keybinds screen: the config's own description
+        // when it has one, else the dispatcher's plain-language name.
+        let action = b
+            .source
+            .as_ref()
+            .and_then(|s| s.config.description.clone())
+            .unwrap_or_else(|| label_for(&b.runtime.dispatcher).to_string());
+        println!("{:<28} {action:<32} [{who}]", b.runtime.chord());
+    }
+    println!("\n{} binds", binds.len());
+    0
+}
+
+/// Report chords defined more than once. Exit 1 when any exist, so this is
+/// usable as a check in a script.
+fn keybind_check(paths: &OmarchyPaths) -> i32 {
+    use studio_core::modules::keybinds;
+    let binds = match keybinds::load_effective(paths, &RealRunner) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("couldn't read the effective keymap: {}", brief(e));
+            return 1;
+        }
+    };
+    // Only binds a config line actually declares can conflict; a plugin bind
+    // has no source to disagree with.
+    let config: Vec<_> = binds
+        .into_iter()
+        .filter_map(|b| b.source.map(|s| s.config))
+        .collect();
+    let conflicts = keybinds::find_conflicts(&config);
+    if conflicts.is_empty() {
+        println!("no conflicting chords");
+        return 0;
+    }
+    for c in &conflicts {
+        println!("{}", c.chord);
+        for b in &c.binds {
+            println!("    {}", b.render_line());
+        }
+    }
+    println!("\n{} conflicting chord(s)", conflicts.len());
+    1
+}
+
+/// Persist a new override set: snapshot, write the managed block, reload.
+///
+/// Mirrors the TUI's commit path (same module name and snapshot pair) so a
+/// change made here is undoable exactly like one made in the screen.
+fn keybind_write(
+    paths: &OmarchyPaths,
+    overrides: &[studio_core::modules::keybinds::Override],
+    summary: &str,
+) -> i32 {
+    use studio_core::modules::keybinds;
+    let file = keybinds::user_bindings_path(paths);
+    let store = history().ok();
+    if let Some(s) = &store {
+        let _ = s.record(
+            SnapshotKind::Pre,
+            &format!("before: {summary}"),
+            std::slice::from_ref(&file),
+            "keybinds",
+            &[],
+        );
+    }
+    match keybinds::apply_overrides(paths, overrides, &RealRunner) {
+        Ok(_) => {
+            if let Some(s) = &store {
+                let _ = s.record(
+                    SnapshotKind::Post,
+                    summary,
+                    std::slice::from_ref(&file),
+                    "keybinds",
+                    &[],
+                );
+            }
+            println!("{summary}");
+            println!("undo with: omarchy-studio snapshot undo");
+            0
+        }
+        Err(e) => {
+            eprintln!("keybind change failed: {}", brief(e));
+            1
+        }
+    }
+}
+
+/// Drop any existing override on `chord` so a new one replaces it rather than
+/// stacking a second line for the same keys.
+fn without_chord(
+    overrides: Vec<studio_core::modules::keybinds::Override>,
+    mask: u16,
+    key: &str,
+) -> Vec<studio_core::modules::keybinds::Override> {
+    use studio_core::modules::keybinds::{chord_id, Override};
+    let target = chord_id(mask, key);
+    overrides
+        .into_iter()
+        .filter(|o| {
+            let id = match o {
+                Override::Set(cb) => chord_id(cb.modmask, &cb.key),
+                Override::Disable { modmask, key } => chord_id(*modmask, key),
+            };
+            id != target
+        })
+        .collect()
+}
+
+fn keybind_add(paths: &OmarchyPaths, chord: &str, dispatcher: &str, arg: &str) -> i32 {
+    use studio_core::modules::keybinds::{self, ConfigBind, Override};
+    let (mask, key) = match parse_chord(chord) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let bind = ConfigBind {
+        flags: "bind".into(),
+        modmask: mask,
+        key: key.clone(),
+        description: None,
+        dispatcher: dispatcher.to_string(),
+        arg: arg.to_string(),
+    };
+    let overrides = {
+        let mut o = without_chord(keybinds::read_overrides(paths), mask, &key);
+        o.push(Override::Set(bind));
+        o
+    };
+    let rendered = keybinds::render_chord(mask, &key);
+    keybind_write(
+        paths,
+        &overrides,
+        &format!("bound {rendered} to {dispatcher}"),
+    )
+}
+
+fn keybind_disable(paths: &OmarchyPaths, chord: &str) -> i32 {
+    use studio_core::modules::keybinds::{self, Override};
+    let (mask, key) = match parse_chord(chord) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let overrides = {
+        let mut o = without_chord(keybinds::read_overrides(paths), mask, &key);
+        o.push(Override::Disable {
+            modmask: mask,
+            key: key.clone(),
+        });
+        o
+    };
+    let rendered = keybinds::render_chord(mask, &key);
+    keybind_write(paths, &overrides, &format!("disabled {rendered}"))
+}
+
+/// Drop Studio's override for one chord, restoring whatever Omarchy binds it
+/// to underneath.
+fn keybind_remove(paths: &OmarchyPaths, chord: &str) -> i32 {
+    use studio_core::modules::keybinds;
+    let (mask, key) = match parse_chord(chord) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let before = keybinds::read_overrides(paths);
+    let count = before.len();
+    let overrides = without_chord(before, mask, &key);
+    let rendered = keybinds::render_chord(mask, &key);
+    if overrides.len() == count {
+        println!("no Studio override on {rendered} — nothing to remove");
+        return 0;
+    }
+    keybind_write(
+        paths,
+        &overrides,
+        &format!("removed Studio's override on {rendered}"),
+    )
+}
+
+/// Drop every Studio keybind override at once (the block itself goes away).
+fn keybind_reset(paths: &OmarchyPaths) -> i32 {
+    use studio_core::modules::keybinds;
+    let count = keybinds::read_overrides(paths).len();
+    if count == 0 {
+        println!("no Studio keybind overrides to reset");
+        return 0;
+    }
+    keybind_write(paths, &[], &format!("reset {count} keybind override(s)"))
 }
 
 // ── nova ────────────────────────────────────────────────────────────────────
@@ -3818,4 +4075,71 @@ fn uninstall_leftovers() {
     println!("\nTo remove the program itself:");
     println!("  pacman -R omarchy-studio      # if installed from the AUR");
     println!("  rm -f $(command -v omarchy-studio)   # if you installed the binary");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use studio_core::modules::keybinds::{mods, ConfigBind, Override};
+
+    #[test]
+    fn parses_a_chord_in_either_separator_style() {
+        let (mask, key) = parse_chord("SUPER+SHIFT+T").unwrap();
+        assert_eq!(mask, mods::SUPER | mods::SHIFT);
+        assert_eq!(key, "T");
+        assert_eq!(parse_chord("SUPER SHIFT T").unwrap(), (mask, "T".into()));
+    }
+
+    #[test]
+    fn a_bare_key_has_no_modifiers() {
+        assert_eq!(parse_chord("F9").unwrap(), (0, "F9".into()));
+    }
+
+    #[test]
+    fn a_misspelled_modifier_is_rejected_rather_than_silently_dropped() {
+        // mods_to_mask maps anything unknown to 0, so without this check
+        // `SUPR+T` would quietly bind a bare T over the user's real one.
+        let err = parse_chord("SUPR+T").unwrap_err();
+        assert!(err.contains("SUPR"), "{err}");
+        assert!(parse_chord("").is_err());
+    }
+
+    fn set(mask: u16, key: &str, dispatcher: &str) -> Override {
+        Override::Set(ConfigBind {
+            flags: "bind".into(),
+            modmask: mask,
+            key: key.into(),
+            description: None,
+            dispatcher: dispatcher.into(),
+            arg: String::new(),
+        })
+    }
+
+    #[test]
+    fn without_chord_drops_only_the_matching_chord() {
+        let overrides = vec![
+            set(mods::SUPER, "T", "exec"),
+            set(mods::SUPER, "Q", "killactive"),
+        ];
+        let left = without_chord(overrides, mods::SUPER, "T");
+        assert_eq!(left.len(), 1);
+        assert!(matches!(&left[0], Override::Set(cb) if cb.key == "Q"));
+    }
+
+    #[test]
+    fn without_chord_matches_a_disable_and_ignores_case() {
+        let overrides = vec![Override::Disable {
+            modmask: mods::SUPER,
+            key: "Q".into(),
+        }];
+        // chord_id upper-cases, so a lowercase request still matches.
+        assert!(without_chord(overrides, mods::SUPER, "q").is_empty());
+    }
+
+    #[test]
+    fn without_chord_keeps_a_different_modifier_set() {
+        let overrides = vec![set(mods::SUPER | mods::SHIFT, "T", "exec")];
+        // Same key, fewer mods — a different chord entirely.
+        assert_eq!(without_chord(overrides, mods::SUPER, "T").len(), 1);
+    }
 }
