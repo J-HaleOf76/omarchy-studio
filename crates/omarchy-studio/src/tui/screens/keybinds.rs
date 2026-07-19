@@ -165,12 +165,18 @@ impl KeybindsScreen {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, skin: &Skin) {
         if let Some(msg) = &self.error {
-            let p = Paragraph::new(vec![
+            let mut lines = vec![
                 Line::from(Span::styled("Can't read your keybinds", skin.accent_bold())),
                 Line::from(""),
-                Line::from(Span::styled(msg.clone(), skin.body())),
-            ])
-            .wrap(Wrap { trim: false });
+            ];
+            // `friendly()` separates the cause from the hint with a blank
+            // line; a Line never breaks on '\n' itself, so split here or the
+            // two run together.
+            lines.extend(
+                msg.split('\n')
+                    .map(|l| Line::from(Span::styled(l.to_string(), skin.body()))),
+            );
+            let p = Paragraph::new(lines).wrap(Wrap { trim: false });
             f.render_widget(p, area);
             return;
         }
