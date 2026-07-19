@@ -133,7 +133,7 @@ fn cli() -> Command {
         .subcommand(group("hooks", "Studio's theme-set and post-update hooks", "usage: omarchy-studio hooks install | remove | status"))
         .subcommand(group("update", "Update Studio itself", "usage: omarchy-studio update [--check]"))
         .subcommand(group("install-integration", "Add Studio to the Omarchy menu", "usage: omarchy-studio install-integration"))
-        .subcommand(group("uninstall", "Remove Studio's hooks, menu entry and managed blocks", "usage: omarchy-studio uninstall"))
+        .subcommand(group("uninstall", "Remove Studio's hooks, menu entry and theme-sync wiring (your configs stay)", "usage: omarchy-studio uninstall"))
         // Dispatched by the Omarchy hook runner, not by people.
         .subcommand(group("hook", "Internal: run a Studio hook event", "usage: omarchy-studio hook <event>").hide(true))
 }
@@ -3688,8 +3688,16 @@ fn install_integration() -> i32 {
     }
 }
 
+/// Remove everything Studio installed *outside* your own configs (spec 10 §4).
+///
+/// Deliberately conservative: the settings Studio wrote are ordinary Omarchy
+/// config and stay valid without it, so they're reported rather than reverted —
+/// nobody wants an uninstall that also undoes the rice. What does come out is
+/// the wiring that only makes sense while Studio exists: hooks, the menu entry,
+/// and the theme-sync block sourcing generated files from Studio's config dir.
 fn uninstall() -> i32 {
     let Some(paths) = omarchy() else { return 4 };
+    let mut failed = false;
 
     // Hooks first — they reference the binary that's about to go away.
     match studio_core::hooks::uninstall(&paths, &studio_core::studio_state_dir()) {
@@ -3698,32 +3706,116 @@ fn uninstall() -> i32 {
                 println!("removed {}", p.display());
             }
         }
-        Err(e) => eprintln!("hook removal failed (continuing): {e:?}"),
+        Err(e) => {
+            eprintln!("hook removal failed (continuing): {e:?}");
+            failed = true;
+        }
     }
 
-    if !studio_core::integration::is_installed(&paths) {
-        println!("Studio was not installed in the Omarchy menu; nothing else to remove.");
-        return 0;
-    }
-    let store = history().ok();
-    let file = studio_core::integration::managed_file(&paths);
-    if let Some(s) = &store {
-        let _ = s.record(
-            SnapshotKind::Pre,
-            "before uninstall",
-            std::slice::from_ref(&file),
-            "integration",
-            &[],
-        );
-    }
-    match studio_core::integration::uninstall_menu(&paths) {
-        Ok(_) => {
-            println!("Removed Studio from the Omarchy menu. Your other configs are untouched.");
-            0
+    // Theme sync: an empty enabled-set makes apply() delete every generated
+    // file and drop the ~/.bashrc block, which would otherwise source files
+    // that are about to disappear.
+    match uninstall_themesync(&paths) {
+        Ok(changed) => {
+            // apply() reports deleted generated files and the edited ~/.bashrc
+            // in one list; saying "removed ~/.bashrc" would read as a deletion.
+            for p in changed {
+                let verb = if p.exists() { "cleaned" } else { "removed" };
+                println!("{verb} {}", p.display());
+            }
         }
         Err(e) => {
-            eprintln!("uninstall failed: {e:?}");
-            1
+            eprintln!("theme-sync removal failed (continuing): {e}");
+            failed = true;
         }
     }
+
+    if studio_core::integration::is_installed(&paths) {
+        let file = studio_core::integration::managed_file(&paths);
+        if let Ok(s) = history() {
+            let _ = s.record(
+                SnapshotKind::Pre,
+                "before uninstall",
+                std::slice::from_ref(&file),
+                "integration",
+                &[],
+            );
+        }
+        match studio_core::integration::uninstall_menu(&paths) {
+            Ok(_) => println!("removed the Studio entry from the Omarchy menu"),
+            Err(e) => {
+                eprintln!("menu removal failed: {e:?}");
+                failed = true;
+            }
+        }
+    }
+
+    uninstall_leftovers();
+    if failed {
+        eprintln!("\nSome steps failed — rerun `omarchy-studio uninstall` or remove them by hand.");
+        return 1;
+    }
+    0
+}
+
+/// Turn every theme-sync tool off and regenerate, which deletes the generated
+/// palettes and the `~/.bashrc` block along with them.
+fn uninstall_themesync(paths: &OmarchyPaths) -> Result<Vec<std::path::PathBuf>, String> {
+    use studio_core::modules::themes::Palette;
+    use studio_core::modules::themesync::{self, Enabled, Pal};
+
+    let config_toml = studio_core::studio_config_dir().join("config.toml");
+    let dir = studio_core::studio_config_dir().join("themesync");
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let bashrc = home.join(".bashrc");
+
+    // Nothing was ever wired up — don't touch the user's bashrc to prove it.
+    if Enabled::load(&config_toml).list().is_empty() && !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    // apply() needs *a* palette to render with, but nothing is being written
+    // here, so a missing active theme must not block the uninstall.
+    let pal = Palette::load(&paths.current_colors())
+        .map(|p| Pal::from_palette(&p))
+        .map_err(|e| format!("no active palette: {}", brief(e)))?;
+    themesync::apply(&dir, &bashrc, &pal, &[]).map_err(brief)
+}
+
+/// Print what Studio is leaving behind, and how to get rid of it (spec 10 §4).
+fn uninstall_leftovers() {
+    let state = studio_core::studio_state_dir();
+    let config = studio_core::studio_config_dir();
+    let history = state.join("history");
+
+    println!("\nYour configs are untouched — everything Studio wrote is ordinary");
+    println!("Omarchy config and keeps working without it.");
+
+    // Anything still in the manifest is something we failed to remove, not
+    // something we chose to keep — call it out rather than bury it.
+    let still_owned = studio_core::manifest::load(&state);
+    if !still_owned.is_empty() {
+        println!("\nStill installed (remove by hand):");
+        for a in still_owned {
+            println!("  {} ({})", a.path.display(), a.kind);
+        }
+    }
+
+    println!("\nLeft behind:");
+    if history.exists() {
+        println!("  {}", history.display());
+        println!("      your change history — every snapshot Studio ever took.");
+        println!(
+            "      Keep it to restore later, or: rm -rf {}",
+            state.display()
+        );
+    }
+    if config.exists() {
+        println!("  {}", config.display());
+        println!("      Studio's own settings.  rm -rf {}", config.display());
+    }
+
+    println!("\nTo remove the program itself:");
+    println!("  pacman -R omarchy-studio      # if installed from the AUR");
+    println!("  rm -f $(command -v omarchy-studio)   # if you installed the binary");
 }
