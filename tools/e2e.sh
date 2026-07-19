@@ -20,24 +20,11 @@ ROOT=$(mktemp -d)
 SESSION="studio-e2e-$$"
 trap 'tmux kill-session -t "$SESSION" 2>/dev/null; rm -rf "$ROOT"' EXIT
 
-# ── fixture: the least Omarchy that `installed()` and the Themes screen accept
-OM="$ROOT/omarchy"
-HOME_DIR="$ROOT/home"
-mkdir -p "$OM/themes/nord" "$HOME_DIR/.config/omarchy/current"
-echo "3.8.9" > "$OM/version"
-cat > "$OM/themes/nord/colors.toml" <<'TOML'
-background = "#2e3440"
-foreground = "#d8dee9"
-accent = "#88c0d0"
-TOML
-mkdir -p "$OM/themes/gruvbox"
-cat > "$OM/themes/gruvbox/colors.toml" <<'TOML'
-background = "#282828"
-foreground = "#ebdbb2"
-accent = "#d79921"
-TOML
-echo "nord" > "$HOME_DIR/.config/omarchy/current/theme.name"
-ln -sfn "$OM/themes/nord" "$HOME_DIR/.config/omarchy/current/theme"
+# ── fixture: shared with tools/screenshot-grid.sh so the grid shows the same
+# desktop these journeys assert against
+# shellcheck source=tools/fixture.sh
+source "$(dirname "$0")/fixture.sh"
+studio_fixture "$ROOT"
 
 fails=0
 pane() { tmux capture-pane -t "$SESSION" -p; }
@@ -67,10 +54,7 @@ check_gone() { # check_gone <description> <extended-regex>
 
 echo "==> launching the TUI in a pty"
 tmux new-session -d -s "$SESSION" -x 110 -y 32 \
-    "env HOME='$HOME_DIR' OMARCHY_PATH='$OM' \
-         XDG_STATE_HOME='$HOME_DIR/.local/state' \
-         XDG_CONFIG_HOME='$HOME_DIR/.config' \
-         XDG_CACHE_HOME='$HOME_DIR/.cache' '$BIN'"
+    "env $(studio_fixture_env) '$BIN'"
 sleep 3
 
 # ── first-run on-ramp: a fresh fixture (no `onboarded` marker, integration

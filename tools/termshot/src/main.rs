@@ -1,9 +1,12 @@
 //! termshot — render `tmux capture-pane -e` output to PNG/GIF.
 //!
-//! The README media pipeline (and, later, the 1.0.6 CI screenshot grid):
-//! drive the TUI in a tmux pane, capture frames *with* escape sequences,
-//! and rasterize them here with a Nerd Font so the images look exactly like
-//! a terminal — no vhs/ttyd/browser stack required.
+//! The README media pipeline and the 1.0.6 CI screenshot grid: drive the TUI
+//! in a tmux pane, capture frames *with* escape sequences, and rasterize them
+//! here with a Nerd Font so the images look exactly like a terminal — no
+//! vhs/ttyd/browser stack required.
+//!
+//! `--grid` additionally tiles every frame into one contact sheet, which is
+//! how CI shows all 16 rail screens in a single artifact.
 //!
 //! ```text
 //! termshot --bg '#111c18' --fg '#c1c497' --px 20 --out docs/assets \
@@ -11,8 +14,12 @@
 //! ```
 //!
 //! Each positional arg is `capture.txt[:delay_ms]`; every frame becomes
-//! `<out>/<stem>.png`, and `--gif` additionally assembles all frames into an
-//! animated GIF with the given per-frame delays.
+//! `<out>/<stem>.png`, `--gif` assembles all frames into an animated GIF with
+//! the given per-frame delays, and `--grid` tiles them into a contact sheet.
+//!
+//! Font paths default to the Omarchy-stock JetBrainsMono Nerd Font; override
+//! with `TERMSHOT_FONT`, `TERMSHOT_FONT_BOLD` and `TERMSHOT_FONT_SYMBOLS`
+//! (CI has no Nerd Font and falls back to DejaVu Sans Mono).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -107,7 +114,11 @@ fn apply_sgr(params: &[u16], style: &mut Style) {
             38 | 48 => {
                 let is_fg = params[i] == 38;
                 if params.get(i + 1) == Some(&2) && i + 4 < params.len() {
-                    let c = (params[i + 2] as u8, params[i + 3] as u8, params[i + 4] as u8);
+                    let c = (
+                        params[i + 2] as u8,
+                        params[i + 3] as u8,
+                        params[i + 4] as u8,
+                    );
                     if is_fg {
                         style.fg = Some(c);
                     } else {
@@ -204,7 +215,9 @@ impl Renderer {
         };
         let regular = load(FONT_REGULAR);
         let bold = load(FONT_BOLD);
-        let symbols = std::fs::read(FONT_SYMBOLS).ok().and_then(|bytes| {
+        let symbols_path =
+            std::env::var("TERMSHOT_FONT_SYMBOLS").unwrap_or_else(|_| FONT_SYMBOLS.into());
+        let symbols = std::fs::read(symbols_path).ok().and_then(|bytes| {
             fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
         });
         let m = regular.metrics('M', px);
@@ -245,7 +258,11 @@ impl Renderer {
                     std::mem::swap(&mut fg, &mut cbg);
                 }
                 if st.dim {
-                    fg = (fg.0 / 2 + cbg.0 / 2, fg.1 / 2 + cbg.1 / 2, fg.2 / 2 + cbg.2 / 2);
+                    fg = (
+                        fg.0 / 2 + cbg.0 / 2,
+                        fg.1 / 2 + cbg.1 / 2,
+                        fg.2 / 2 + cbg.2 / 2,
+                    );
                 }
                 let x0 = margin + c as u32 * self.cell_w;
                 let y0 = margin + r as u32 * self.cell_h;
@@ -277,8 +294,8 @@ impl Renderer {
                     })
                     .clone();
                 let gx = x0 as i64 + metrics.xmin as i64;
-                let gy = y0 as i64 + (self.ascent as i64) - metrics.ymin as i64
-                    - metrics.height as i64;
+                let gy =
+                    y0 as i64 + (self.ascent as i64) - metrics.ymin as i64 - metrics.height as i64;
                 for (i, cov) in coverage.iter().enumerate() {
                     if *cov == 0 {
                         continue;
@@ -308,6 +325,27 @@ impl Renderer {
     }
 }
 
+/// Tile equal-sized frames into one contact sheet, `cols` per row.
+///
+/// The CI screenshot grid renders every rail screen at once, so a reviewer can
+/// eyeball all of them from a single artifact instead of trusting that a
+/// screen still draws.
+fn grid(frames: &[image::RgbaImage], cols: u32, gap: u32, bg: (u8, u8, u8)) -> image::RgbaImage {
+    let (fw, fh) = (frames[0].width(), frames[0].height());
+    let cols = cols.min(frames.len() as u32).max(1);
+    let rows = (frames.len() as u32).div_ceil(cols);
+    let w = cols * fw + gap * (cols + 1);
+    let h = rows * fh + gap * (rows + 1);
+    let mut sheet = image::RgbaImage::from_pixel(w, h, image::Rgba([bg.0, bg.1, bg.2, 255]));
+    for (i, frame) in frames.iter().enumerate() {
+        let (c, r) = (i as u32 % cols, i as u32 / cols);
+        let x = gap + c * (fw + gap);
+        let y = gap + r * (fh + gap);
+        image::imageops::overlay(&mut sheet, frame, x as i64, y as i64);
+    }
+    sheet
+}
+
 fn hex(s: &str) -> (u8, u8, u8) {
     let s = s.trim_start_matches('#');
     (
@@ -326,6 +364,8 @@ fn main() {
     let mut bg = (0x11, 0x1c, 0x18);
     let mut out_dir = PathBuf::from(".");
     let mut gif: Option<PathBuf> = None;
+    let mut grid_out: Option<PathBuf> = None;
+    let mut grid_cols = 4u32;
     let mut frames: Vec<(PathBuf, u32)> = Vec::new();
 
     let mut i = 0;
@@ -359,6 +399,14 @@ fn main() {
                 i += 1;
                 gif = Some(PathBuf::from(&args[i]));
             }
+            "--grid" => {
+                i += 1;
+                grid_out = Some(PathBuf::from(&args[i]));
+            }
+            "--grid-cols" => {
+                i += 1;
+                grid_cols = args[i].parse().unwrap();
+            }
             frame => {
                 let (path, delay) = match frame.rsplit_once(':') {
                     Some((p, d)) if d.chars().all(|c| c.is_ascii_digit()) => {
@@ -373,8 +421,8 @@ fn main() {
     }
     if frames.is_empty() {
         eprintln!(
-            "usage: termshot [--cols N --rows N --px F --fg #hex --bg #hex --out DIR --gif FILE] \
-             capture.txt[:delay_ms] …"
+            "usage: termshot [--cols N --rows N --px F --fg #hex --bg #hex --out DIR \
+             --gif FILE --grid FILE --grid-cols N] capture.txt[:delay_ms] …"
         );
         std::process::exit(2);
     }
@@ -394,17 +442,31 @@ fn main() {
         rendered.push((img, *delay));
     }
 
+    if let Some(grid_path) = grid_out {
+        let sheet = grid(
+            &rendered
+                .iter()
+                .map(|(img, _)| img.clone())
+                .collect::<Vec<_>>(),
+            grid_cols,
+            px.round() as u32,
+            bg,
+        );
+        if let Some(parent) = grid_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        sheet.save(&grid_path).unwrap();
+        println!("wrote {}", grid_path.display());
+    }
+
     if let Some(gif_path) = gif {
         let file = std::fs::File::create(&gif_path).unwrap();
         let mut enc = image::codecs::gif::GifEncoder::new_with_speed(file, 10);
-        enc.set_repeat(image::codecs::gif::Repeat::Infinite).unwrap();
+        enc.set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
         for (img, delay) in rendered {
-            let frame = image::Frame::from_parts(
-                img,
-                0,
-                0,
-                image::Delay::from_numer_denom_ms(delay, 1),
-            );
+            let frame =
+                image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(delay, 1));
             enc.encode_frame(frame).unwrap();
         }
         println!("wrote {}", gif_path.display());

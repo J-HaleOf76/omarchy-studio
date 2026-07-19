@@ -74,3 +74,39 @@ jobs:
         run: |
           cargo build
           ./tools/e2e.sh ./target/debug/omarchy-studio
+
+  screens:
+    name: screenshot grid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (pinned, see rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@1.96.1
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # No Nerd Font on a runner; DejaVu is metrically sane and the grid is a
+      # regression check, not marketing media (README shots are captured on a
+      # real Omarchy by tools/capture-readme-media.sh).
+      - name: Install tmux and fonts
+        run: sudo apt-get update && sudo apt-get install -y tmux fonts-dejavu-core
+
+      # Walks every rail screen and asserts each one draws its own panel — a
+      # screen that panics or renders empty fails here, which unit tests can't
+      # see and the journeys only check for two screens. The grid is uploaded
+      # so a reviewer can eyeball all 16 at once.
+      - name: Capture every screen
+        env:
+          TERMSHOT_FONT: /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+          TERMSHOT_FONT_BOLD: /usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf
+        run: |
+          cargo build
+          ./tools/screenshot-grid.sh ./target/debug/omarchy-studio screens.png
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens
+          path: screens.png
